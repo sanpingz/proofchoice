@@ -25,7 +25,7 @@ import { REGISTRY, Relayer, detectionProbability, sampleForTarget } from './regi
 import { boot } from './server.js';
 import { callTool } from './mcp.js';
 import { handleRpc, SUPPORTED_VERSIONS } from './mcp.js';
-import { FsStore, MemoryStore, storeFromEnv } from './store.js';
+import { FsStore, MemoryStore, BlobStore, storeFromEnv } from './store.js';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -372,6 +372,14 @@ async function storage() {
     eq(await s.list('log'), ['l1', 'l2'], `${tag}: list returns entries in order`);
     eq(await s.list('nolog'), [], `${tag}: list of an absent log is empty`);
 
+    /* Concurrent appends must each get a DISTINCT position, because
+     * the position becomes the block number. FsStore originally
+     * appended then re-counted, so four concurrent callers all read
+     * the same final length and reported position 4. */
+    const got = await Promise.all([1, 2, 3, 4].map(i => s.append('conc', `c${i}`)));
+    eq(new Set(got).size, 4, `${tag}: concurrent appends get distinct positions`);
+    eq((await s.list('conc')).length, 4, `${tag}: no concurrent append is lost`);
+
     await s.del('a:b');
     eq(await s.has('a:b'), false, `${tag}: del()`);
     if (s.kind === 'fs') await rm(s.dir, { recursive: true, force: true });
@@ -390,9 +398,34 @@ async function storage() {
   process.env.KV_REST_API_URL = 'https://example.upstash.io';
   process.env.KV_REST_API_TOKEN = 'tok';
   eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'redis', 'on Vercel with KV configured → redis store');
+
+  /* A connected Blob store wins, per the chosen storage shape. */
+  process.env.BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_STOREID_secret';
+  const blob = storeFromEnv({ dataDir: '/tmp/x' });
+  eq(blob.kind, 'blob', 'with a Blob token configured → blob store');
+  eq(blob.access, 'private', '   … defaults to private access');
+  eq(blob.persistent && blob.shared, true, '   … declares itself persistent and shared');
+  delete process.env.BLOB_READ_WRITE_TOKEN;
+
+  process.env.BLOB_STORE_ID = 'store_abc'; process.env.VERCEL_OIDC_TOKEN = 'oidc';
+  eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'blob', 'OIDC pair (BLOB_STORE_ID + VERCEL_OIDC_TOKEN) also selects blob');
+  delete process.env.BLOB_STORE_ID; delete process.env.VERCEL_OIDC_TOKEN;
+
   delete process.env.VERCEL; delete process.env.KV_REST_API_URL; delete process.env.KV_REST_API_TOKEN;
-  eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'fs', 'locally with no KV → filesystem store');
+  eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'fs', 'locally with no store configured → filesystem store');
   Object.assign(process.env, saved);
+
+  /* A public store would publish every candidate price and salt, and
+   * would also serve overwritten blobs up to 60s stale. Refused. */
+  const pub = new BlobStore({ access: 'private' });
+  let refused = false;
+  try { pub._assertPrivate('https://abc.public.blob.vercel-storage.com/pc/x'); }
+  catch (e) { refused = /PUBLIC/.test(e.message); }
+  eq(refused, true, 'a public Blob URL is refused rather than silently accepted');
+  let allowed = true;
+  try { pub._assertPrivate('https://abc.private.blob.vercel-storage.com/pc/x'); }
+  catch { allowed = false; }
+  eq(allowed, true, '   … a private Blob URL passes');
 }
 
 /* ============================================================

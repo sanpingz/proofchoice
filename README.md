@@ -31,15 +31,39 @@ Anything in the build that implies otherwise is a bug. Specifically, and permane
 ## Quick start
 
 ```sh
-node server/server.js     # console + REST + MCP on http://127.0.0.1:8787
-node server/test.js       # 112 assertions
+npm start                 # console + REST + MCP on http://127.0.0.1:8787
+npm run dev               # same, with hot reload
+npm test                  # 112 assertions
 npx vercel --prod         # deploy — read Deploying to Vercel first
 ```
 
-Node 20+ (developed on 26). No npm install, no bundler, no framework, no dependencies.
+Node 20+ (developed on 26). No bundler, no framework — the scripts are plain `node` invocations, so
+`node server/server.js` works just as well.
+
+**One optional dependency.** `@vercel/blob` is needed *only* by the Vercel Blob storage backend, and
+it is imported dynamically: the filesystem, memory and Redis backends run with no `node_modules` at
+all, and the test suite passes without it. Run `npm install` only if you are deploying against a
+Blob store.
 
 Open <http://127.0.0.1:8787/> for the console. A local HTTP proxy will intercept `localhost` from
 curl — pass `--noproxy '*'` if you have one.
+
+### Dev mode
+
+`npm run dev` is `node --watch server/server.js --dev`. Two halves, no dependency and no injected
+script:
+
+- **Server changes** — Node's own `--watch` restarts the process on any change in the module graph.
+- **Console changes** — the server watches `public/` and pushes over an SSE channel at `/dev/events`;
+  the page reloads itself. A restart reloads the browser too: the stream drops, `EventSource`
+  reconnects on its own, sees a different boot id, and reloads.
+
+The console shows a green **DEV · LIVE** chip while the channel is up, and `reconnecting…` while the
+server is restarting. `npm run test:watch` re-runs the suite on save.
+
+Dev mode is off unless you ask for it (`--dev`, or `PC_DEV=1`), and is force-disabled on serverless —
+`/dev/events` returns 404 and `/health` reports `dev: false`. A long-lived stream and a filesystem
+watcher are both meaningless in a lambda and would only burn execution time.
 
 ---
 
@@ -343,16 +367,47 @@ behind three backends, each declaring what it can actually guarantee.
 | Backend | Persistent | Shared | Used when |
 | --- | --- | --- | --- |
 | `fs` | yes | yes (single host) | local default |
+| `blob` | yes | yes | `BLOB_READ_WRITE_TOKEN`, or `BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN` |
 | `redis` | yes | yes | `KV_REST_API_*` or `UPSTASH_REDIS_REST_*` are set |
-| `memory` | **no** | **no** | serverless with no database configured |
+| `memory` | **no** | **no** | serverless with no store configured |
 
-`shared` is the one that matters for correctness. On a shared store, `anchor()`'s write-once rule is
-enforced by an atomic `SET .. NX`, so it holds across concurrent instances rather than only within one
-process. Block numbers are positions in the log, assigned on read, so two concurrent writers cannot
-mint the same number.
+`shared` is the one that matters for correctness. Write-once anchoring must hold across concurrent
+instances, not merely within one process, and block numbers must equal log positions so two writers
+cannot mint the same number. Each backend earns those two properties differently:
 
-Redis is spoken over the Upstash REST API with plain `fetch`, so the zero-dependency rule survives the
-move to serverless.
+| | write-once (`setNX`) | append position |
+| --- | --- | --- |
+| `fs` | create-if-absent on the filesystem | serialised through an in-process queue |
+| `blob` | `allowOverwrite: false` | ETag compare-and-swap, retried on conflict |
+| `redis` | `SET .. NX` | `RPUSH` returns the new length |
+| `memory` | map insert | array length |
+
+Redis is spoken over the Upstash REST API with plain `fetch`. Blob needs `@vercel/blob`, imported
+dynamically so the other three backends stay dependency-free.
+
+### Vercel Blob
+
+**The store must be private**, for two independent reasons — and access mode cannot be changed after
+a store is created:
+
+1. **Confidentiality.** Evidence preimages carry every candidate price and every salt. On a public
+   store anyone with the URL can read them, which defeats the salted-leaf design outright.
+2. **Correctness.** Overwrites take up to 60 seconds to propagate through the CDN. The ledger is
+   overwritten on every append, so a public store could serve a stale log and report *no anchor for
+   this proof ID* for a proof written seconds earlier. Private blobs read through the function with
+   `useCache: false` skip the cache entirely — which is the difference between a ledger and an
+   eventually-consistent guess.
+
+The server refuses a public store at the first write rather than silently accepting it.
+
+Two distinct write primitives, which the SDK forbids combining (`ifMatch` implies `allowOverwrite`):
+`allowOverwrite: false` gives create-if-absent, used for write-once anchoring; `ifMatch: <etag>` gives
+compare-and-swap, used to append to the log. A concurrent writer invalidates the ETag and the append
+retries, so no entry is lost and positions stay unique.
+
+Object storage is a better fit for evidence preimages — content-addressed, immutable, write-once —
+than for a mutable append log. If you later attach a KV store as well, set `PC_STORE=redis` to move
+the ledger there and keep Blob for what it is good at.
 
 `GET /health` reports `store.kind`, `store.persistent` and `store.shared` alongside a
 `storage_disclosure` sentence. On `memory` that sentence says, in as many words, that the deployment
@@ -372,15 +427,32 @@ npx vercel --prod     # production
 and the REST routes work at the deployment root. `public/` is served statically before any rewrite
 reaches the function. No build step; nothing to install.
 
-### You almost certainly want a KV store
+### You almost certainly want a persistent store
 
 Without one, Vercel gets the `memory` backend: the ledger is erased on every cold start and is not
 shared between concurrent instances. `pc_attest` in one instance followed by `pc_verify` in another
 will report *no anchor for this proof ID*. Fine for a five-minute walkthrough in one warm instance,
 misleading for anything else.
 
-Add one from the dashboard: **Storage → Marketplace → Upstash for Redis → Connect**. That injects
-`KV_REST_API_URL` and `KV_REST_API_TOKEN`, which the server picks up with no code change.
+Either works, and the server picks it up with no code change:
+
+- **Vercel Blob** — create a **private** store, then **Projects → Connect to Project**. Vercel injects
+  `BLOB_STORE_ID` and `VERCEL_OIDC_TOKEN`. Run `npm install` so `@vercel/blob` is present. See
+  [Vercel Blob](#vercel-blob) above for why private is mandatory.
+- **Upstash Redis** — **Storage → Marketplace → Upstash for Redis → Connect**, which injects
+  `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+
+If both are connected, Blob wins; set `PC_STORE=redis` to prefer Redis.
+
+Verify the wiring before trusting it:
+
+```sh
+vercel env pull .env.local
+node --env-file=.env.local server/check-store.js
+```
+
+That runs the full storage contract — including that create-if-absent *refuses* a second write, and
+that concurrent appends each get a distinct position — then cleans up after itself.
 
 ### Set `PC_KEYS` before the first real demo
 
@@ -455,7 +527,11 @@ curl --noproxy '*' 'localhost:8787/detection?n=8&k=1&s=4&proofs=5'
 | `PC_PORT` | `8787` | Listen port |
 | `PC_HOST` | `127.0.0.1` | Bind address |
 | `PC_DATA` | `server/data` | Filesystem store location |
-| `PC_STORE` | auto | Force a backend: `fs` or `memory` |
+| `PC_STORE` | auto | Force a backend: `fs`, `blob`, `redis` or `memory` |
+| `PC_DEV` | — | `1` enables hot reload and `/dev/events`. Ignored on serverless. Same as `--dev` |
+| `BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN` | — | Vercel Blob via OIDC. Injected when you connect a store |
+| `BLOB_READ_WRITE_TOKEN` | — | Vercel Blob via static token, for running outside Vercel |
+| `PC_BLOB_ACCESS` | `private` | Blob access mode. Leave it — a public store is refused, by design |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | — | Redis store. `UPSTASH_REDIS_REST_*` also accepted |
 | `PC_KEYS` | — | Base64 key set from `node server/keygen.js`. Required on serverless |
 | `PC_PUBLIC_URL` | `http://host:port` | URL emitted in `search`/`fetch` results |
@@ -489,7 +565,12 @@ custody model introduces, plus sampling.
 and nested structures — the console's independent-verification claim is worthless if they drift.
 
 **Storage adapters.** Every backend through the same interface, including `setNX` refusing an existing
-key. Environment selection is pinned so serverless cannot silently fall back to a read-only filesystem.
+key and concurrent appends each getting a distinct position. Environment selection is pinned so
+serverless cannot silently fall back to a read-only filesystem, and a public Blob URL is refused.
+
+The Blob and Redis backends talk to a real service, so the unit tests cover only their selection and
+guard logic. `npm run check:store` exercises the full contract against whatever backend the
+environment selects — run it once after wiring a store up.
 
 **Write-once anchoring.** A repeat `snapshot_hash` reverts, block numbers stay equal to log positions,
 and a full round trip runs on a non-filesystem store.

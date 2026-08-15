@@ -13,6 +13,10 @@
     "dev": "node --watch server/server.js --dev",
     "test": "node server/test.js",
     "test:watch": "node --watch server/test.js",
+    "check:store": "node server/check-store.js",
     "keygen": "node server/keygen.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
   }
 }

@@ -9,3 +9,6 @@ Design.md
 prototype/
 
 .DS_Store
+
+# Installed at build time from package.json.
+node_modules/
