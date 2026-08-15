@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ProofChoice server state — chain, keys, custody blobs
+server/data/
+.DS_Store
