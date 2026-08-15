@@ -517,6 +517,154 @@ async function storage() {
 }
 
 /* ============================================================
+   3.7 — Console: many proofs, latest by default
+   ------------------------------------------------------------
+   The console holds a list of proof records, one chain of custody
+   per query. Evaluated here under a minimal DOM shim because these
+   are the selection rules the whole multi-proof view rests on, and
+   a regression would silently show the wrong proof's custody chain
+   next to the right proof's ID.
+   ============================================================ */
+
+async function consoleProofs() {
+  section('Console — multiple proofs');
+  const { readFileSync } = await import('node:fs');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  /* Everything up to the boot IIFE: the definitions, none of the
+   * start-up that expects a live DOM and a real server. */
+  const full = readFileSync(join(root, 'public/index.html'), 'utf8')
+    .match(/<script>([\s\S]*?)<\/script>/)[1];
+  const src = full.split('/* ---------- boot ---------- */')[0];
+  eq(src.length < full.length, true, 'console source splits cleanly at the boot marker');
+
+  const saved = { document: globalThis.document, window: globalThis.window, CSS: globalThis.CSS,
+                  EventSource: globalThis.EventSource, fetch: globalThis.fetch };
+  globalThis.document = { getElementById: () => null, querySelector: () => null,
+                          querySelectorAll: () => [], createElement: () => ({ style: {}, classList: { add(){}, remove(){}, toggle(){} }, setAttribute(){} }) };
+  globalThis.window = {};
+  globalThis.CSS = { escape: s => s };
+  globalThis.EventSource = class { addEventListener(){} set onerror(v){} };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+
+  let T;
+  try {
+    T = (0, eval)(src + '\n;({canon,canonSegments,cur,rec,addProof,S,VERDICT_CLASS,pickWinner,renderDisclosure,stripModel,updateDraftHash});');
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+
+  T.S.registry = [{ id: 'SUP-01', score: 88 }, { id: 'SUP-02', score: 86 }];
+  T.S.draft.declared = new Set(['SUP-01', 'SUP-02']);
+  eq(T.pickWinner().id, 'SUP-01', 'winner is picked from the DRAFT, not from a committed proof');
+
+  T.addProof({ proof_id: 'PC-AAA', snapshot_hash: 'a'.repeat(64), audit: null });
+  T.addProof({ proof_id: 'PC-BBB', snapshot_hash: 'b'.repeat(64), audit: { verdict: 'fail' } });
+  eq(T.S.proofs.map(p => p.proof_id), ['PC-AAA', 'PC-BBB'], 'proofs accumulate, oldest first');
+  eq(T.S.selected, 'PC-BBB', 'the latest proof is selected by default');
+  eq(T.cur().proof_id, 'PC-BBB', '   … and is what the strip renders');
+
+  T.S.selected = 'PC-AAA';
+  eq(T.cur().proof_id, 'PC-AAA', 'selecting an earlier proof switches the chain of custody');
+  eq(T.VERDICT_CLASS[T.rec('PC-BBB').audit.verdict], 'bad', 'each proof keeps its own verdict');
+
+  T.S.composing = true;
+  eq(T.cur(), null, 'a new query shows no proof — its chain of custody starts empty');
+  T.S.composing = false;
+
+  T.addProof({ proof_id: 'PC-AAA', query: 'updated' });
+  eq(T.S.proofs.length, 2, 're-adding a proof id updates rather than duplicating');
+  eq(T.rec('PC-AAA').query, 'updated', '   … merging the new fields in');
+  eq(T.S.selected, 'PC-AAA', '   … and selecting it');
+
+  /* The strip is progressive: it advances a stage at a time and a new
+   * query restarts it from 01 rather than blanking. Before this, it
+   * was binary — all seven empty until the commit, then five at once. */
+  section('Console — chain of custody advances');
+  const stages = () => T.stripModel().map(s => (s.st ? '#' : '.')).join('');
+
+  T.S.proofs = []; T.S.selected = null; T.S.composing = true;
+  T.S.draft = { query: 'Annual room-block · Hong Kong', declared: new Set(['SUP-01', 'SUP-02']) };
+  await T.updateDraftHash();
+  eq(stages(), '#......', 'a draft has stage 01 advanced, the rest awaiting');
+  eq(T.S.draftQueryHash, await sha256(T.S.draft.query),
+     '   … and stage 01 shows the real query hash, computed in-browser');
+  eq(T.stripModel()[1].v, '2 candidates declared', 'stage 02 tracks the declared set before commit');
+  T.S.draft.declared.delete('SUP-02');
+  eq(T.stripModel()[1].v, '1 candidate declared', '   … updating as candidates are pruned');
+
+  T.S.draft.query = '';
+  await T.updateDraftHash();
+  eq(stages(), '.......', 'an empty query has not started a flow');
+  T.S.draft.query = 'Annual room-block · Hong Kong';
+  await T.updateDraftHash();
+
+  /* A committed proof advances the middle of the strip. */
+  T.addProof({
+    proof_id: 'PC-CCC', snapshot_hash: 'c'.repeat(64),
+    snapshot: { query_hash: 'd'.repeat(64) },
+    anchor: { block: 3, platform_signature: 'e'.repeat(96), block_timestamp: 'now' },
+    custody: { model: 'hybrid', holders: [1, 2, 3] },
+    coverage: null, audit: null,
+  });
+  eq(stages(), '#####..', 'committing advances 01-05, leaving receipts and verdict awaiting');
+  T.rec('PC-CCC').coverage = { affirm: 8, deny: 0, uncovered: 0, total: 8 };
+  eq(stages(), '######.', 'receipts advance stage 06');
+  T.rec('PC-CCC').audit = { verdict: 'pass', checks: [] };
+  eq(stages(), '#######', 'the verdict completes the chain');
+
+  T.S.composing = true;
+  eq(stages(), '#......', 'a new query restarts the flow at 01 rather than blanking it');
+  T.S.composing = false;
+  eq(stages(), '#######', 'switching back to a proof restores its own completed chain');
+
+  /* A proof re-opened from the ledger has an anchor but no snapshot
+   * until its evidence is served — and the evidence may legitimately
+   * be withheld, lost or expired. stripModel() used to dereference
+   * snapshot.query_hash unconditionally, so render() threw and the
+   * WHOLE PAGE went blank: the console died on exactly the finding it
+   * exists to display. */
+  T.addProof({
+    proof_id: 'PC-DDD', snapshot_hash: 'f'.repeat(64),
+    snapshot: null, custody: null,
+    anchor: { block: 9, platform_signature: 'a'.repeat(96), block_timestamp: 'now' },
+    coverage: null, audit: null,
+  });
+  let threw = null;
+  try { T.stripModel(); } catch (e) { threw = e.message; }
+  eq(threw, null, 'a proof with no retrievable preimage does not throw');
+  eq(T.stripModel().length, 7, '   … and still renders all seven stages');
+  eq(T.stripModel()[0].v, 'preimage unavailable', '   … stage 01 says the preimage is unavailable');
+  eq(T.stripModel()[1].v.startsWith('ffffffff'), true, '   … stage 02 still shows the anchored hash');
+  eq(T.stripModel()[3].v, 'block 9', '   … stage 04 still shows the anchor block');
+  eq(T.stripModel()[4].v, 'manifest not loaded', '   … stage 05 says the manifest is not loaded');
+
+  /* The disclosure banner is silent when the deployment can back what
+   * it shows, and speaks up when it cannot. The second half is the one
+   * that must never regress: it is how a memory-store or ephemeral-key
+   * deployment admits it cannot support a claim about history. */
+  section('Console — disclosure banner');
+  const el = { innerHTML: 'stale', className: '' };
+  const savedDoc = globalThis.document;
+  globalThis.document = { getElementById: id => (id === 'disclose' ? el : null),
+                          querySelector: () => null, querySelectorAll: () => [] };
+  try {
+    T.S.health = { store: { kind: 'redis', persistent: true, shared: true }, key_source: 'env' };
+    T.renderDisclosure();
+    eq(el.innerHTML, '', 'healthy deployment renders no banner');
+
+    T.S.health = { store: { kind: 'memory', persistent: false, shared: false }, key_source: 'ephemeral' };
+    T.renderDisclosure();
+    eq(el.innerHTML.includes('cannot back everything'), true, 'ephemeral deployment still warns');
+    eq(el.innerHTML.includes('erased on restart'), true, '   … naming the ephemeral store');
+    eq(el.innerHTML.includes('signing key'), true, '   … and the ephemeral signing key');
+  } finally {
+    globalThis.document = savedDoc;
+  }
+}
+
+/* ============================================================
    4.5 — Redis store against a real socket
    ------------------------------------------------------------
    There is no Redis on this machine, and mocking the client would
@@ -710,6 +858,7 @@ await goldenVectors();
 await acceptance();
 await protocol();
 await canonParity();
+await consoleProofs();
 await origins();
 await storage();
 await redisStore();

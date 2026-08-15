@@ -277,6 +277,12 @@ pinned `canon()` and **recomputes the snapshot hash in the browser** from the se
 reports whether that matches. If the page and the server ever disagreed, the disagreement would
 itself be the finding — which is the argument the product makes, so the UI had better make it too.
 
+- **One chain of custody per query.** Every request gets its own proof, and the console keeps them
+  all — a chip per proof above the strip, latest selected by default, click to switch. The query
+  field is editable, and committing a different one starts a separate chain. On load the console
+  reads existing proofs back out of the ledger rather than forgetting them, hydrating each lazily
+  when selected; if an old proof's evidence has since been withheld, lost or expired, that shows up
+  as the finding it is rather than as a broken view.
 - **Seven-stage custody strip.** Custody is a genuine stage: the server writes a `registerCustody()`
   record naming who acknowledged holding the preimage and until when.
 - **Pruning as a real control.** Untick a supplier in the agent view and it is genuinely absent from
@@ -544,6 +550,7 @@ curl --noproxy '*' -X POST localhost:8787/attest -H 'content-type: application/j
 
 curl --noproxy '*' -X POST localhost:8787/receipts -H 'content-type: application/json' \
   -d '{"proof_id":"PC-XXXXXXXXXX"}'
+curl --noproxy '*' localhost:8787/receipts/PC-XXXXXXXXXX   # stored receipts, without re-requesting
 curl --noproxy '*' localhost:8787/verify/PC-XXXXXXXXXX
 curl --noproxy '*' localhost:8787/evidence/PC-XXXXXXXXXX      # 409 when custody fails
 curl --noproxy '*' localhost:8787/proof/PC-XXXXXXXXXX

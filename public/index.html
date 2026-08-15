@@ -75,9 +75,14 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 .chip.bad{border-color:#E7C3BA;background:var(--fault-lite);color:var(--fault)}
 
 /* ---------- disclosure banner ---------- */
+/* Only rendered when there is something to disclose — an ephemeral
+   store or ephemeral keys. The standing "cryptography is real, the
+   ledger is a single-operator log" note is not a warning and does not
+   need a permanent banner; it lives on the store chip's tooltip, in
+   the anchor-registry view, and in GET /health. */
 .disclose{background:var(--amber-lite);border-bottom:1px solid #E5D0B4;padding:10px 22px;font-size:12.5px;color:#5C3A0B}
 .disclose b{display:block;font-size:12.5px;margin-bottom:2px}
-.disclose.ok{background:var(--seal-lite);border-bottom-color:#BFD5C6;color:#2A4A3C}
+.disclose:empty{display:none}
 
 /* ---------- custody strip ---------- */
 .strip{background:var(--ink);padding:15px 22px 17px;overflow-x:auto}
@@ -92,6 +97,20 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 .seg[data-goto]:hover .lb{color:#FFF}
 .seg[data-goto]:hover .bar{border-color:#7F8E9C}
 .seg:focus-visible{outline:2px solid #8FB8A6;outline-offset:3px;border-radius:2px}
+/* Proof switcher. One chip per chain of custody, newest first. */
+.proofbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.plabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-right:4px}
+.pchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
+  padding:4px 9px;border-radius:2px;border:1px solid #2E3A47;background:var(--ink2);color:#9FADB9}
+button.pchip{cursor:pointer}
+button.pchip:hover{border-color:#54626F;color:#DCE4EA}
+.pchip.on{border-color:#6C8B7C;background:#1A2A24;color:#EAF2ED}
+.pchip .pdot{width:7px;height:7px;border-radius:50%;background:#54626F;flex:none}
+.pchip.done .pdot{background:#4E9E7E} .pchip.warn .pdot{background:var(--amber)}
+.pchip.bad .pdot{background:var(--fault)} .pchip.info .pdot{background:#5C7F99}
+.pchip.draft{border-style:dashed}
+.pchip:focus-visible{outline:2px solid #8FB8A6;outline-offset:2px}
+
 .seg > span{display:block}
 .seg .bar{height:5px;border-radius:1px;background:transparent;border:1px dashed #3B4854;transition:background .35s ease,border-color .35s ease}
 .seg.done .bar{background:var(--seal);border:1px solid var(--seal)}
@@ -255,7 +274,8 @@ tr.frow td.fk{font-family:var(--mono);font-size:11px}
 <div id="disclose"></div>
 
 <div class="strip">
-  <div class="strip-hd">Chain of custody — current proof</div>
+  <div class="strip-hd">Chain of custody — <span id="stripSubject"></span></div>
+  <div class="proofbar" id="proofbar"></div>
   <div class="custody" id="custody"></div>
 </div>
 
@@ -362,22 +382,54 @@ const api = {
 
 /* ---------- state ---------- */
 const QUERY = 'Annual room-block framework · Hong Kong · 4-star+ · 120 room-nights/month';
+
+/* ------------------------------------------------------------
+   Many proofs, not one.
+
+   Every query produces its own chain of custody, so the console
+   holds a LIST of proof records and shows the latest by default.
+   The server always worked this way — the ledger is append-only and
+   every endpoint is per-proof — it was only the UI that forgot.
+
+   Two distinct things share the screen:
+     · a DRAFT — the query being composed and the candidate set the
+       agent is about to declare. It has no proof yet, so the strip
+       reads as awaiting.
+     · a PROOF record — committed, anchored, and immutable.
+
+   Starting a new query resets the strip, which is exactly what "each
+   query gets its own chain of custody" means.
+   ------------------------------------------------------------ */
 let S = {
   role:'buyer', health:null, registry:[],
-  declared:new Set(), proof:null, receipts:null, coverage:null,
-  audit:null, evidence:null, recomputed:null,
-  model:'hybrid', routing:'relayer', busy:false,
-  error:null,        // inline, never alert()
-  auditStale:false,  // switches changed since the verdict was computed
+  proofs:[],            // oldest first; each one its own chain of custody
+  selected:null,        // proof_id currently shown
+  composing:true,       // a draft query is being prepared
+  draft:{ query:QUERY, declared:new Set() },
+  model:'hybrid', routing:'relayer',
+  error:null,           // inline, never alert()
 };
+
+/** The proof on screen, or null while composing a new query. */
+const cur = () => (S.composing ? null : S.proofs.find(p => p.proof_id === S.selected) ?? null);
+/** The record for a proof id regardless of what is on screen. */
+const rec = id => S.proofs.find(p => p.proof_id === id) ?? null;
+
+function addProof(r){
+  const i = S.proofs.findIndex(p => p.proof_id === r.proof_id);
+  if(i >= 0) S.proofs[i] = { ...S.proofs[i], ...r }; else S.proofs.push(r);
+  S.selected = r.proof_id;
+  S.composing = false;
+}
 
 const setError = (title, detail) => { S.error = {title, detail}; };
 const clearError = () => { S.error = null; };
 
 /** A verdict computed before the adversary switches changed is not
  *  wrong, it is stale. Saying so is better than silently discarding
- *  it — and far better than leaving it on screen as if it still held. */
-function markStale(){ if(S.audit) S.auditStale = true; }
+ *  it — and far better than leaving it on screen as if it still held.
+ *  The switches are server-wide, so every held verdict goes stale. */
+function markStale(){ for(const p of S.proofs) if(p.audit) p.auditStale = true; }
 
 function errorBlock(){
   if(!S.error) return '';
@@ -401,26 +453,58 @@ const ROLES = [
    writes a registerCustody() record naming who acknowledged
    holding the preimage and until when.
    ============================================================ */
+/* The strip is progressive: it fills in as a run advances, and a new
+   query restarts it from stage 01 rather than blanking. Stage 01 is
+   genuinely knowable before anything is committed — the query exists,
+   and its hash is computed here in the browser, so what the strip
+   shows before the commit is the same value the server will commit. */
+function draftStripModel(){
+  const q = S.draft.query.trim();
+  const n = S.draft.declared.size;
+  return [
+    {n:'01', lb:'Query',     st:q?'done':'', go:'buyer',    hash:!!S.draftQueryHash,
+             v:!q ? 'awaiting request' : (S.draftQueryHash ? short(S.draftQueryHash)+'…' : 'hashing…')},
+    {n:'02', lb:'Snapshot',  st:'', go:'agent',
+             v:n ? `${n} candidate${n===1?'':'s'} declared` : 'no candidates declared'},
+    {n:'03', lb:'Signature', st:'', go:'agent',    v:'unsigned'},
+    {n:'04', lb:'Anchor',    st:'', go:'chain',    v:'not anchored'},
+    {n:'05', lb:'Custody',   st:'', go:'auditor',  v:`${S.model} · on commit`},
+    {n:'06', lb:'Receipts',  st:'', go:'supplier', v:'not requested'},
+    {n:'07', lb:'Verdict',   st:'', go:'auditor',  v:'not audited'},
+  ];
+}
+
 function stripModel(){
-  const p = S.proof, a = S.audit;
-  const cov = S.coverage;
+  const c = cur();
+  if(!c) return draftStripModel();
+  const p = c, a = c?.audit ?? null;
+  const cov = c?.coverage ?? null;
   const cs = a?.custody_state;
   const custodySt = !p ? '' : cs === 'AVAILABLE' || !cs ? 'done'
                     : cs === 'EXPIRED' ? 'info' : 'bad';
   const hashSt = !p ? '' : !a ? 'done'
                  : a.checks?.[2]?.state === 'bad' ? 'bad'
                  : a.checks?.[2]?.state === 'warn' ? 'warn' : 'done';
+  /* Everything below must survive a proof whose preimage is gone.
+     Evidence can legitimately be withheld, lost or expired, and a
+     re-opened proof then has an anchor but no snapshot — which used
+     to throw here and blank the entire page. The anchor alone still
+     carries the hash, the signature and the block. */
+  const snap = p.snapshot ?? null;
+  const anc = p.anchor ?? null;
   return [
-    {n:'01', lb:'Query',     st:p?'done':'',  go:'buyer',    hash:!!p,
-             v:p?short(p.snapshot.query_hash)+'…':'awaiting request'},
-    {n:'02', lb:'Snapshot',  st:hashSt,       go:'agent',    hash:!!p,
-             v:p?short(p.snapshot_hash)+'…':'not built'},
-    {n:'03', lb:'Signature', st:!p?'':(a&&a.checks?.[3]?.state==='warn'?'warn':'done'), go:'agent', hash:!!p,
-             v:p?short(p.anchor.platform_signature)+'…':'unsigned'},
+    {n:'01', lb:'Query',     st:p?'done':'',  go:'buyer',    hash:!!snap,
+             v:snap ? short(snap.query_hash)+'…' : 'preimage unavailable'},
+    {n:'02', lb:'Snapshot',  st:hashSt,       go:'agent',    hash:!!p.snapshot_hash,
+             v:p.snapshot_hash ? short(p.snapshot_hash)+'…' : 'not built'},
+    {n:'03', lb:'Signature', st:!p?'':(a&&a.checks?.[3]?.state==='warn'?'warn':'done'), go:'agent', hash:!!anc?.platform_signature,
+             v:anc?.platform_signature ? short(anc.platform_signature)+'…' : 'unsigned'},
     {n:'04', lb:'Anchor',    st:p?'done':'',  go:'chain',
-             v:p?`block ${p.anchor.block}`:'not anchored'},
+             v:anc ? `block ${anc.block}` : 'not anchored'},
     {n:'05', lb:'Custody',   st:custodySt,    go:'auditor',
-             v:p?(cs?cs.toLowerCase():`${p.custody.model} · ${p.custody.holders.length} holders`):'not distributed'},
+             v:cs ? cs.toLowerCase()
+                  : p.custody ? `${p.custody.model} · ${(p.custody.holders??[]).length} holders`
+                  : 'manifest not loaded'},
     {n:'06', lb:'Receipts',  st:!cov?'':(cov.deny?'bad':cov.uncovered?'warn':'done'), go:'supplier',
              v:cov?`${cov.affirm} affirm · ${cov.deny} deny · ${cov.uncovered} uncovered`:'not requested'},
     {n:'07', lb:'Verdict',   st:!a?'':a.verdict==='pass'?'done':a.verdict==='partial'?'warn':a.verdict==='inconclusive'?'info':'bad',
@@ -428,7 +512,41 @@ function stripModel(){
              v:a?a.verdict.toUpperCase():'not audited'},
   ];
 }
+const VERDICT_CLASS = {pass:'done', partial:'warn', inconclusive:'info', fail:'bad'};
+
+/** One chip per proof, newest first, plus the draft while composing.
+ *  A single proof proves very little; seeing them accumulate is the
+ *  first step toward reading them as a corpus. */
+function renderProofBar(){
+  const el = document.getElementById('proofbar');
+  if(!el) return;
+  const chips = S.proofs.slice().reverse().map(p=>{
+    const st = p.audit ? VERDICT_CLASS[p.audit.verdict] : '';
+    const on = !S.composing && p.proof_id === S.selected;
+    return `<button type="button" class="pchip ${st} ${on?'on':''}" data-proof="${esc(p.proof_id)}"
+      title="${esc(p.query ?? '')}">
+      <span class="pdot"></span>${esc(p.proof_id)}</button>`;
+  }).join('');
+  /* No "new query" affordance here: the bar is purely a switcher.
+     Starting a run belongs to the roles that do it — "Ask the agent"
+     in the buyer view, "Start a new query" in the agent view. */
+  const draft = S.composing ? `<span class="pchip on draft"><span class="pdot"></span>new query</span>` : '';
+  el.innerHTML =
+    `<span class="plabel">${S.proofs.length} proof${S.proofs.length===1?'':'s'}</span>` +
+    draft + chips;
+}
+
+/** The query hash of the draft, recomputed in-browser as it is typed,
+ *  so stage 01 shows the real value rather than a placeholder. */
+async function updateDraftHash(){
+  const q = S.draft.query.trim();
+  S.draftQueryHash = q ? await sha256(S.draft.query) : null;
+}
+
 function renderStrip(){
+  renderProofBar();
+  const subj = document.getElementById('stripSubject');
+  if(subj) subj.textContent = S.composing ? 'new query, not yet committed' : (cur()?.proof_id ?? '');
   document.getElementById('custody').innerHTML = stripModel().map(s=>`
     <button type="button" class="seg ${s.st}" data-goto="${s.go}"
             aria-label="Stage ${s.n}, ${s.lb}: ${esc(s.v)}">
@@ -444,8 +562,9 @@ function renderStrip(){
 const V = {};
 
 V.buyer = () => {
-  const w = S.proof ? S.registry.find(r=>r.id===S.proof.snapshot.winner_id) : null;
-  const a = S.audit;
+  const p = cur();
+  const w = p?.snapshot ? S.registry.find(r=>r.id===p.snapshot.winner_id) : null;
+  const a = p?.audit ?? null;
   return `
   <div class="eyebrow">Role 01 · Buyer</div>
   <h1>Ask the agent</h1>
@@ -453,19 +572,24 @@ V.buyer = () => {
 
   <div class="card">
     <div class="klabel">Procurement request</div>
-    <input type="text" value="${esc(QUERY)}" readonly />
+    <input type="text" id="qInput" value="${esc(S.draft.query)}" aria-label="Procurement request" />
     <div class="actrow" style="margin-top:12px">
-      <button class="act" id="goAsk" ${S.proof?'disabled':''}>Ask the agent</button>
-      <span class="hint" style="margin:0">Takes you to the agent, where the candidate set is declared.</span>
+      <button class="act" id="goAsk">Ask the agent</button>
+      <span class="hint" style="margin:0">Each request gets its own chain of custody. Edit the text to commit a different one.</span>
     </div>
+    ${S.proofs.length?`<div class="note">${S.proofs.length} proof${S.proofs.length===1?'':'s'} committed so far. A single proof proves very little; a run of them is where patterns become visible.</div>`:''}
   </div>
 
+  ${p&&!w&&p.snapshot?`<div class="card"><div class="klabel">Recommendation</div>
+    <div class="empty">Winner ${esc(p.snapshot.winner_id)} is not in the current registry.</div></div>`:''}
+
   ${w?`<div class="card">
-    <div class="klabel">Recommendation</div>
+    <div class="klabel">Recommendation · ${esc(p.proof_id)}</div>
     <h3>${esc(w.name)}</h3>
     <p class="hint">¥${w.price.toLocaleString()} per room-night · quality score ${w.score} · ${w.comm>0?`supplier pays a ${w.comm}% commission`:'no commission paid to the platform'}</p>
+    ${p.query?`<div class="klabel" style="margin-top:14px">Request</div><div class="mono" style="font-size:12px;color:var(--slate)">${esc(p.query)}</div>`:''}
     <div class="klabel" style="margin-top:14px">Proof ID</div>
-    <div class="mono" style="font-size:15px;font-weight:600">${esc(S.proof.proof_id)}</div>
+    <div class="mono" style="font-size:15px;font-weight:600">${esc(p.proof_id)}</div>
     <div class="note">Derived from the snapshot hash, so you can locate your own anchor without asking the platform where it is. Hand this to any auditor.</div>
   </div>`:''}
 
@@ -473,61 +597,81 @@ V.buyer = () => {
 };
 
 V.agent = () => {
+  const p = cur();
+  /* While composing, the table is the editable draft. Once committed,
+     it shows what that proof actually declared — read-only, because an
+     anchored candidate set is not editable by definition. */
+  const committed = p ? new Set((p.evidence?.served?.[0]?.blob?.candidates ?? []).map(c=>c.id)) : null;
+  const declaredSet = S.composing ? S.draft.declared : committed;
+  const knowSet = S.composing || (committed && committed.size);
+
   const rows = S.registry.map(c=>{
-    const inSet = S.declared.has(c.id);
-    const isWin = S.proof && S.proof.snapshot.winner_id===c.id;
-    return `<tr class="${!inSet?'out':''} ${isWin?'win':''}">
-      <td><input type="checkbox" data-cand="${c.id}" ${inSet?'checked':''} ${S.proof?'disabled':''} aria-label="Declare ${esc(c.name)}" /></td>
+    const inSet = knowSet ? declaredSet.has(c.id) : false;
+    const isWin = p?.snapshot?.winner_id === c.id;
+    return `<tr class="${knowSet&&!inSet?'out':''} ${isWin?'win':''}">
+      <td>${S.composing
+        ? `<input type="checkbox" data-cand="${c.id}" ${inSet?'checked':''} aria-label="Declare ${esc(c.name)}" />`
+        : ''}</td>
       <td class="num">${c.id}</td><td class="nm">${esc(c.name)}</td>
       <td class="num">¥${c.price.toLocaleString()}</td><td class="num">${c.score}</td><td class="num">${c.comm}%</td>
-      <td>${!inSet?'<span class="tag t-bad">not declared</span>':isWin?'<span class="tag t-ok">winner</span>':'<span class="tag t-idle">candidate</span>'}</td>
+      <td>${!knowSet?'<span class="tag t-idle">—</span>'
+            :!inSet?'<span class="tag t-bad">not declared</span>'
+            :isWin?'<span class="tag t-ok">winner</span>':'<span class="tag t-idle">candidate</span>'}</td>
     </tr>`;
   }).join('');
-  const omitted = S.registry.filter(c=>!S.declared.has(c.id));
+  const omitted = S.composing ? S.registry.filter(c=>!S.draft.declared.has(c.id)) : [];
   const winner = pickWinner();
 
   return `
   <div class="eyebrow">Role 02 · AI agent platform · ProofChoice plugin</div>
-  <h1>Declare and commit</h1>
+  <h1>${S.composing?'Declare and commit':'Committed set · '+esc(p?.proof_id ?? '')}</h1>
   <p class="lede">The plugin observes. It never re-ranks, blocks or delays the recommendation — it commits to what the agent already decided, and signs that commitment.</p>
 
   <div class="card">
     <div class="klabel">Stage 1 · the candidate pool the agent declares</div>
-    <p class="hint">Untick a supplier to prune it. The plugin will attest perfectly to whatever remains — that is exactly what the baseline layer cannot see.</p>
+    <p class="hint">${S.composing
+      ? 'Untick a supplier to prune it. The plugin will attest perfectly to whatever remains — that is exactly what the baseline layer cannot see.'
+      : knowSet ? 'Anchored, so no longer editable. Start a new query to declare a different set.'
+                : 'The evidence for this proof is not currently retrievable, so the declared set cannot be shown.'}</p>
     <table><thead><tr><th></th><th>ID</th><th>Supplier</th><th>Unit price</th><th>Score</th><th>Commission</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    ${omitted.length&&!S.proof?`<div class="note bad"><b>${omitted.length} supplier${omitted.length===1?'':'s'} withheld from the declared set.</b> Stages 2–4 will still produce a perfectly valid proof. Only the registry receipts in stage 5 can reach this.</div>`:''}
+    ${omitted.length?`<div class="note bad"><b>${omitted.length} supplier${omitted.length===1?'':'s'} withheld from the declared set.</b> Stages 2–4 will still produce a perfectly valid proof. Only the registry receipts in stage 5 can reach this.</div>`:''}
     <div class="actrow" style="margin-top:14px">
-      <button class="act" id="goAttest" ${S.proof||!S.declared.size?'disabled':''}>Commit &amp; anchor${winner?` — winner ${winner.id}`:''}</button>
-      <span class="hint" style="margin:0">Winner is the highest-scoring declared supplier.</span>
+      ${S.composing
+        ? `<button class="act" id="goAttest" ${!S.draft.declared.size?'disabled':''}>Commit &amp; anchor${winner?` — winner ${winner.id}`:''}</button>
+           <span class="hint" style="margin:0">Winner is the highest-scoring declared supplier.</span>`
+        : `<button class="act ghost" id="goNewQuery">Start a new query</button>
+           <span class="hint" style="margin:0">Creates a separate chain of custody.</span>`}
     </div>
   </div>
 
-  ${S.proof?`<div class="card">
+  ${p?.snapshot?`<div class="card">
     <div class="klabel">Stage 2–4 · snapshot, signature, anchor</div>
-    <pre class="blob">${pretty(S.proof.snapshot)}</pre>
+    <pre class="blob">${pretty(p.snapshot)}</pre>
     <div class="klabel" style="margin-top:12px">snapshot_hash · SHA-256 over canonical JSON</div>
-    <div class="mono">${esc(S.proof.snapshot_hash)}</div>
+    <div class="mono">${esc(p.snapshot_hash)}</div>
     <div class="klabel" style="margin-top:12px">platform signature · ECDSA P-256</div>
-    <div class="mono" style="color:var(--slate)">${esc(S.proof.anchor.platform_signature)}</div>
+    <div class="mono" style="color:var(--slate)">${esc(p.anchor.platform_signature)}</div>
     <div class="klabel" style="margin-top:12px">anchor</div>
-    <div class="mono">block ${S.proof.anchor.block} · ${esc(S.proof.anchor.block_timestamp)}</div>
+    <div class="mono">block ${p.anchor.block} · ${esc(p.anchor.block_timestamp)}</div>
     <div class="note">Signing binds the commitment to a key. It does not make the commitment true — the platform is signing its own account of its own decision.</div>
-  </div>
+  </div>`:''}
 
-  <div class="card">
+  ${p?.custody?`<div class="card">
     <div class="klabel">Stage 5 · custody manifest</div>
-    <p class="hint">Model <b>${esc(S.proof.custody.model)}</b> · retained until ${esc(S.proof.custody.retention_until)}</p>
-    ${S.proof.custody.holders.map(h=>`<div class="hold"><span class="hn">${esc(h.holder)}</span>
+    <p class="hint">Model <b>${esc(p.custody.model)}</b> · retained until ${esc(p.custody.retention_until)}</p>
+    ${(p.custody.holders??[]).map(h=>`<div class="hold"><span class="hn">${esc(h.holder)}</span>
       <span>${esc(h.label)}<br><span class="mono" style="color:var(--slate2);font-size:10.5px">ack ${short(h.ack_signature,28)}…</span></span></div>`).join('')}
     <div class="note">Each holder signed an acknowledgement that it holds the preimage. A holder that later cannot produce it is contradicting its own signature, rather than merely asserting bad luck.</div>
   </div>`:''}`;
 };
 
 V.schema = () => {
-  const p = S.proof;
+  const p = cur();
   if(!p) return emptyView('Schema inspector','Commit a proof first — there is nothing to hash yet.');
+  if(!p.snapshot) return emptyView('Schema inspector',
+    `The evidence for ${p.proof_id} is not retrievable, so there are no bytes to inspect. The anchor still verifies — see the auditor.`);
   const bytes = p.canonical_bytes;
-  const diff = S.byteDiff;
+  const diff = p.byteDiff;
   const seg = canonSegments(p.snapshot);
   return `
   <div class="eyebrow">Role 03 · Schema inspector</div>
@@ -564,8 +708,8 @@ V.schema = () => {
       <div class="step on"><div class="sh">candidate → canon() → SHA-256 → leaf</div><div class="sv">${p.snapshot.candidate_count} salted leaves, sorted by id</div></div>
       <div class="step on"><div class="sh">leaves → pairwise SHA-256 → merkle root</div><div class="sv">${esc(p.merkle_root)}</div></div>
       <div class="step on"><div class="sh">snapshot → canon() → byte string</div><div class="sv">${bytes} bytes</div></div>
-      <div class="step ${S.recomputed===p.snapshot_hash?'on':''}"><div class="sh">→ SHA-256 → snapshot_hash</div>
-        <div class="sv">${esc(S.recomputed ?? '—')} ${S.recomputed?`<span class="tag ${S.recomputed===p.snapshot_hash?'t-ok':'t-bad'}">${S.recomputed===p.snapshot_hash?'matches server':'MISMATCH'}</span>`:''}</div></div>
+      <div class="step ${p.recomputed===p.snapshot_hash?'on':''}"><div class="sh">→ SHA-256 → snapshot_hash</div>
+        <div class="sv">${esc(p.recomputed ?? '—')} ${p.recomputed?`<span class="tag ${p.recomputed===p.snapshot_hash?'t-ok':'t-bad'}">${p.recomputed===p.snapshot_hash?'matches server':'MISMATCH'}</span>`:''}</div></div>
       <div class="step on"><div class="sh">→ slice(0,10) → proof_id</div><div class="sv">${esc(p.proof_id)}</div></div>
       <div class="step on"><div class="sh">→ ECDSA P-256 → signature → anchor payload</div><div class="sv">block ${p.anchor.block}</div></div>
     </div>
@@ -613,8 +757,9 @@ V.schema = () => {
 };
 
 V.supplier = () => {
-  const r = S.receipts;
-  const c = S.coverage;
+  const p = cur();
+  const r = p?.receipts?.length ? p.receipts : null;
+  const c = p?.coverage;
   const rows = S.registry.map(sup=>{
     const rec = r?.find(x=>x.supplier_id===sup.id);
     let tag = '<span class="tag t-idle">not asked yet</span>';
@@ -642,7 +787,7 @@ V.supplier = () => {
         <option value="relayer" ${S.routing==='relayer'?'selected':''}>Neutral relayer</option>
         <option value="legacy" ${S.routing==='legacy'?'selected':''}>Legacy — through the platform</option>
       </select>
-      <button class="act" id="goReceipts" ${!S.proof||S.receipts?'disabled':''}>Send receipt requests</button>
+      <button class="act" id="goReceipts" ${!p||r?'disabled':''}>Send receipt requests</button>
     </div>
     ${S.routing==='legacy'?`<div class="note bad"><b>Legacy routing.</b> The platform batches receipts on the suppliers' behalf. Watch what happens to the denials.</div>`:''}
   </div>
@@ -665,7 +810,8 @@ V.supplier = () => {
 };
 
 V.auditor = () => {
-  const a = S.audit;
+  const p = cur();
+  const a = p?.audit ?? null;
   const icon = {ok:'✓',bad:'✕',warn:'!',idle:'·'};
   return `
   <div class="eyebrow">Role 05 · Auditor</div>
@@ -674,14 +820,14 @@ V.auditor = () => {
 
   <div class="card">
     <div class="klabel">Proof under audit</div>
-    <div class="mono" style="font-size:14px;font-weight:600;margin-bottom:12px">${esc(S.proof?.proof_id ?? '—')}</div>
-    <div class="actrow"><button class="act" id="goVerify" ${!S.proof?'disabled':''}>Run verification</button></div>
+    <div class="mono" style="font-size:14px;font-weight:600;margin-bottom:12px">${esc(p?.proof_id ?? '—')}</div>
+    <div class="actrow"><button class="act" id="goVerify" ${!p?'disabled':''}>Run verification</button></div>
   </div>
 
   ${a?`
-  ${S.auditStale?`<div class="stalebar"><b>This verdict is out of date.</b> A switch changed after it was computed, so it describes the previous state. Re-run verification.</div>`:''}
+  ${p.auditStale?`<div class="stalebar"><b>This verdict is out of date.</b> A switch changed after it was computed, so it describes the previous state. Re-run verification.</div>`:''}
   ${verdictBlock(a,false)}
-  <div class="card checks ${S.auditStale?'stale':''}">
+  <div class="card checks ${p.auditStale?'stale':''}">
     ${a.checks.map((c,i)=>`<div class="check">
       <div class="ic ${c.state}">${icon[c.state]}</div>
       <div><div class="ct">${i+1}. ${esc(c.title)}</div><div class="cd">${esc(c.detail)}</div></div>
@@ -699,8 +845,8 @@ V.auditor = () => {
 
   <div class="card">
     <div class="klabel">Independent recomputation — in this browser</div>
-    ${S.recomputed?`<div class="mono">${esc(S.recomputed)}</div>
-      <div class="actrow" style="margin-top:8px"><span class="tag ${S.recomputed===S.proof.snapshot_hash?'t-ok':'t-bad'}">${S.recomputed===S.proof.snapshot_hash?'matches the anchor':'does not match the anchor'}</span></div>
+    ${p.recomputed?`<div class="mono">${esc(p.recomputed)}</div>
+      <div class="actrow" style="margin-top:8px"><span class="tag ${p.recomputed===p.snapshot_hash?'t-ok':'t-bad'}">${p.recomputed===p.snapshot_hash?'matches the anchor':'does not match the anchor'}</span></div>
       <div class="note">Computed here from the evidence the server served, using the same pinned <span class="mono">canon()</span>. If this page and the server ever disagreed, that disagreement would itself be the finding.</div>`
       :`<div class="empty">Evidence was not retrievable, so there is nothing to recompute from.</div>`}
   </div>
@@ -732,7 +878,7 @@ V.chain = () => {
 function emptyView(t,m){ return `<div class="eyebrow">ProofChoice</div><h1>${esc(t)}</h1><p class="lede">${esc(m)}</p>`; }
 
 function verdictBlock(a, buyerVoice){
-  const stale = S.auditStale ? ' stale' : '';
+  const stale = cur()?.auditStale ? ' stale' : '';
   const T = {
     pass:         buyerVoice?'This answer holds up':'Verified',
     partial:      buyerVoice?'Partly verifiable':'Verified with gaps',
@@ -804,14 +950,14 @@ function bitDiff(h1,h2){
   }
   return {diff, out};
 }
-async function computeByteDiff(){
-  S.byteDiff = null;
-  const ev = S.evidence;
+async function computeByteDiff(P){
+  P.byteDiff = null;
+  const ev = P.evidence;
   if(!ev?.served || ev.served.length < 2) return;
   const withHash = [];
   for(const s of ev.served) withHash.push({...s, canonical: canon(s.blob.snapshot), h: await sha256(canon(s.blob.snapshot))});
-  const good = withHash.find(x=>x.h===S.proof.snapshot_hash);
-  const bad  = withHash.find(x=>x.h!==S.proof.snapshot_hash);
+  const good = withHash.find(x=>x.h===P.snapshot_hash);
+  const bad  = withHash.find(x=>x.h!==P.snapshot_hash);
   if(!good||!bad) return;
 
   const a = good.canonical, b = bad.canonical;
@@ -826,7 +972,7 @@ async function computeByteDiff(){
   for(let i = 0; i < segs.length; i++)
     if(segs[i].t !== 'eq' && (i === 0 || segs[i-1].t === 'eq')) edits++;
 
-  S.byteDiff = {
+  P.byteDiff = {
     holder: bad.holder,
     aHtml: renderSide(segs,'del','byte-del'),
     bHtml: renderSide(segs,'ins','byte-ins'),
@@ -842,63 +988,89 @@ async function computeByteDiff(){
    Actions
    ============================================================ */
 function pickWinner(){
-  const set = S.registry.filter(c=>S.declared.has(c.id));
+  const set = S.registry.filter(c=>S.draft.declared.has(c.id));
   return set.length ? set.reduce((a,b)=>b.score>a.score?b:a) : null;
 }
 
-async function refreshEvidence(){
-  S.evidence = null; S.recomputed = null; S.byteDiff = null;
-  if(!S.proof) return;
-  const r = await api.get('/evidence/'+S.proof.proof_id);
-  S.evidence = r.body;
+async function refreshEvidence(P){
+  if(!P) return;
+  P.evidence = null; P.recomputed = null; P.byteDiff = null;
+  const r = await api.get('/evidence/'+P.proof_id);
+  P.evidence = r.body;
   if(r.body?.served?.length){
     for(const s of r.body.served){
       const h = await sha256(canon(s.blob.snapshot));
-      if(h === S.proof.snapshot_hash){ S.recomputed = h; break; }
-      S.recomputed = h;
+      if(h === P.snapshot_hash){ P.recomputed = h; break; }
+      P.recomputed = h;
     }
-    await computeByteDiff();
+    /* A proof re-opened from the ledger has no snapshot until the
+       evidence is served — so derive it, and the canonical bytes with
+       it, from whichever copy hashes to the anchor. */
+    if(!P.snapshot){
+      const authentic = r.body.served.find(async s => true) && r.body.served[0];
+      for(const s of r.body.served){
+        if(await sha256(canon(s.blob.snapshot)) === P.snapshot_hash){
+          P.snapshot = s.blob.snapshot;
+          P.query = P.query ?? s.blob.query;
+          break;
+        }
+      }
+      if(!P.snapshot && authentic) P.snapshot = null;
+    }
+    if(P.snapshot && !P.canonical){
+      P.canonical = canon(P.snapshot);
+      P.canonical_bytes = new TextEncoder().encode(P.canonical).length;
+      P.merkle_root = P.merkle_root ?? P.snapshot.candidate_merkle_root;
+    }
+    await computeByteDiff(P);
   }
 }
 
 const ACTIONS = {
-  goAsk(){ S.role='agent'; },
+  async goAsk(){
+    if(!S.composing) await ACTIONS.goNewQuery();
+    S.role = 'agent';
+  },
 
   async goAttest(){
     const w = pickWinner();
     const r = await api.post('/attest', {
-      query: QUERY,
-      candidate_ids: S.registry.filter(c=>S.declared.has(c.id)).map(c=>c.id),
+      query: S.draft.query,
+      candidate_ids: S.registry.filter(c=>S.draft.declared.has(c.id)).map(c=>c.id),
       winner_id: w.id,
       custody_model: S.model,
     });
     if(!r.ok) return setError('Could not commit the snapshot.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
     clearError();
-    S.proof = r.body;
-    await refreshEvidence();
+    addProof({ ...r.body, query: S.draft.query,
+               receipts:null, coverage:null, audit:null, auditStale:false });
+    await refreshEvidence(cur());
     S.role = 'schema';
   },
 
   async goReceipts(){
-    const r = await api.post('/receipts', {proof_id:S.proof.proof_id, routing:S.routing});
+    const P = cur();
+    const r = await api.post('/receipts', {proof_id:P.proof_id, routing:S.routing});
     if(!r.ok) return setError('Could not collect receipts.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
     clearError();
-    S.receipts = r.body.receipts; S.coverage = r.body.coverage;
+    P.receipts = r.body.receipts; P.coverage = r.body.coverage;
     S.role = 'auditor';
   },
 
   async goVerify(){
-    const r = await api.get('/verify/'+S.proof.proof_id);
+    const P = cur();
+    const r = await api.get('/verify/'+P.proof_id);
     if(!r.ok) return setError('Verification could not run.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
     clearError();
-    S.audit = r.body;
-    S.auditStale = false;
-    await refreshEvidence();
+    P.audit = r.body;
+    P.auditStale = false;
+    if(!P.coverage && r.body.checks?.[5]?.coverage) P.coverage = r.body.checks[5].coverage;
+    await refreshEvidence(P);
   },
 
   async btnTamper(){
-    await api.post('/custody-control', {holder:'platform', tamper_proof_id:S.proof.proof_id});
-    await refreshEvidence();
+    await api.post('/custody-control', {holder:'platform', tamper_proof_id:cur().proof_id});
+    await refreshEvidence(cur());
     markStale();
   },
 
@@ -908,15 +1080,68 @@ const ACTIONS = {
     markStale();
     clearError();
     await loadChain();
-    await refreshEvidence();
+    await refreshEvidence(cur());
     document.getElementById('selClock').value = '0';
     render();
   },
 
-  copyCanon(){ navigator.clipboard?.writeText(S.proof.canonical); },
+  copyCanon(){ navigator.clipboard?.writeText(cur()?.canonical ?? ''); },
+
+  /* A new query is a new chain of custody: reset the draft and clear
+     the selection so the strip reads as awaiting, not as the previous
+     proof's state. */
+  async goNewQuery(){
+    S.composing = true;
+    S.draft = { query: S.draft.query, declared: new Set(S.registry.map(c=>c.id)) };
+    await updateDraftHash();
+    clearError();
+    S.role = 'buyer';
+  },
 };
 
-async function loadChain(){ S.chain = (await api.get('/chain?limit=40')).body; }
+async function loadChain(){ S.chain = (await api.get('/chain?limit=60')).body; }
+
+/* ------------------------------------------------------------
+   The ledger is append-only and survives restarts, so the console
+   reads its proofs back out of it rather than forgetting everything
+   on reload. Each anchor becomes a stub; the rest is fetched lazily
+   when that proof is selected, because the evidence for an old proof
+   may legitimately be withheld, lost or expired — and finding that
+   out is itself part of the demonstration.
+   ------------------------------------------------------------ */
+async function loadProofs(){
+  const blocks = (await api.get('/chain?limit=200')).body ?? [];
+  const anchors = blocks.filter(b=>b.type==='anchor').sort((a,b)=>a.block-b.block);
+  S.proofs = anchors.map(a=>({
+    proof_id: 'PC-' + a.snapshot_hash.slice(0,10).toUpperCase(),
+    snapshot_hash: a.snapshot_hash,
+    anchor: a, custody: null, snapshot: null, canonical: null,
+    query: null, receipts: null, coverage: null,
+    audit: null, auditStale: false,
+    evidence: null, recomputed: null, byteDiff: null,
+    hydrated: false,
+  }));
+  if(S.proofs.length){
+    S.selected = S.proofs[S.proofs.length - 1].proof_id;   // latest by default
+    S.composing = false;
+    await hydrate(cur());
+  } else {
+    S.composing = true;
+  }
+}
+
+/** Fill in everything the ledger and custody layer can still give us. */
+async function hydrate(P){
+  if(!P) return;
+  const [meta, rc] = await Promise.all([
+    api.get('/proof/' + P.proof_id),
+    api.get('/receipts/' + P.proof_id),
+  ]);
+  if(meta.ok){ P.custody = meta.body.custody ?? null; P.anchor = meta.body.anchor ?? P.anchor; }
+  if(rc.ok){ P.receipts = rc.body.receipts ?? null; P.coverage = rc.body.coverage ?? null; }
+  await refreshEvidence(P);      // may fail — that is a finding, not an error
+  P.hydrated = true;
+}
 
 /* ============================================================
    Render + wiring
@@ -938,10 +1163,10 @@ function renderRail(){
     sel.innerHTML = S.health.custody_models.map(m=>`<option value="${m}">${m}</option>`).join('');
     sel.value = S.model;
   }
-  sel.disabled = !!S.proof;
-  document.getElementById('modelNote').textContent = S.proof
-    ? 'Locked for this proof. Reset switches and commit a new proof to change it.'
-    : MODEL_NOTES[S.model] ?? '';
+  sel.disabled = !S.composing;
+  document.getElementById('modelNote').textContent = S.composing
+    ? (MODEL_NOTES[S.model] ?? '')
+    : 'Locked for this proof. Start a new query to choose a different model.';
 
   document.getElementById('holderCtl').innerHTML = HOLDERS.map(([id,label])=>`
     <label for="hm_${id}">${esc(label)}</label>
@@ -949,7 +1174,7 @@ function renderRail(){
       ${MODES.map(m=>`<option value="${m}" ${S.holderMode?.[id]===m?'selected':''}>${m}</option>`).join('')}
     </select>`).join('');
 
-  document.getElementById('btnTamper').disabled = !S.proof;
+  document.getElementById('btnTamper').disabled = !cur();
 }
 
 const MODEL_NOTES = {
@@ -966,10 +1191,11 @@ function renderDisclosure(){
   if(!h.store.persistent) problems.push('The ledger is in process memory: it is erased on restart and is not shared between instances, so it cannot support a claim about history.');
   if(h.key_source==='ephemeral') problems.push('The platform signing key was generated by this instance and will be lost on restart, so older anchors would verify against an unregistered key.');
   const el = document.getElementById('disclose');
-  el.className = problems.length ? 'disclose' : 'disclose ok';
+  /* Silent when the deployment can back what it shows. It speaks up
+     only when it cannot — which is the case worth interrupting for. */
   el.innerHTML = problems.length
     ? `<b>This deployment cannot back everything the UI shows.</b>${problems.map(p=>' '+esc(p)).join('')}`
-    : `<b>Cryptography is real; the ledger is a single-operator append-only log, not a blockchain.</b> Every hash and signature here is recomputable, and this page recomputes them. It does not resist the operator deleting the store.`;
+    : '';
 }
 
 function render(){
@@ -997,7 +1223,7 @@ function render(){
     if(S.role==='chain') loadChain().then(render); else render();
   });
   document.querySelectorAll('[data-cand]').forEach(b=>b.onchange=()=>{
-    b.checked ? S.declared.add(b.dataset.cand) : S.declared.delete(b.dataset.cand);
+    b.checked ? S.draft.declared.add(b.dataset.cand) : S.draft.declared.delete(b.dataset.cand);
     render();
   });
   document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{
@@ -1007,17 +1233,32 @@ function render(){
   document.querySelectorAll('[data-holder]').forEach(sel=>sel.onchange=async()=>{
     S.holderMode = {...(S.holderMode??{}), [sel.dataset.holder]: sel.value};
     await api.post('/custody-control',{holder:sel.dataset.holder, mode:sel.value});
-    markStale(); await refreshEvidence(); render();
+    markStale(); await refreshEvidence(cur()); render();
   });
   const ex = document.getElementById('errX');
   if(ex) ex.onclick = () => { clearError(); render(); };
+
+  const qi = document.getElementById('qInput');
+  if(qi) qi.oninput = async () => {
+    S.draft.query = qi.value;
+    await updateDraftHash();
+    renderStrip();          // strip only — a full render would steal focus from the field
+  };
+
+  /* Switching proofs shows that proof's own chain of custody. */
+  document.querySelectorAll('[data-proof]').forEach(b=>b.onclick=async()=>{
+    S.selected = b.dataset.proof; S.composing = false;
+    const P = cur();
+    if(P && !P.hydrated) await hydrate(P);
+    render();
+  });
 
   const sm = document.getElementById('selModel');
   sm.onchange = () => { S.model = sm.value; render(); };
   const sc = document.getElementById('selClock');
   sc.onchange = async () => {
     await api.post('/custody-control',{advance_months:Number(sc.value)});
-    markStale(); await refreshEvidence(); render();
+    markStale(); await refreshEvidence(cur()); render();
   };
   const sr = document.getElementById('selRouting');
   if(sr) sr.onchange = () => { S.routing = sr.value; render(); };
@@ -1039,7 +1280,8 @@ function render(){
 (async function boot(){
   const [h, reg] = await Promise.all([api.get('/health'), api.get('/registry')]);
   S.health = h.body; S.registry = reg.body;
-  S.declared = new Set(S.registry.map(c=>c.id));
+  S.draft.declared = new Set(S.registry.map(c=>c.id));
+  await updateDraftHash();
   S.model = S.health.default_custody_model ?? 'hybrid';
   S.holderMode = {platform:'serve',buyer:'serve',neutral:'serve'};
 
@@ -1047,12 +1289,31 @@ function render(){
   const chip = document.getElementById('chipStore');
   chip.textContent = `store: ${st.kind}${st.persistent?'':' · ephemeral'}`;
   chip.className = 'chip' + (st.persistent ? '' : ' bad');
+  /* The standing disclosure, kept reachable without a permanent
+     banner. Both sentences come from the server, not from this page. */
+  chip.title = [S.health.trust_disclosure, S.health.storage_disclosure].filter(Boolean).join('\n\n');
   const kc = document.getElementById('chipKeys');
   kc.textContent = `keys: ${S.health.key_source}`;
   kc.className = 'chip' + (S.health.key_source==='ephemeral' ? ' warn' : '');
+  kc.title = S.health.key_source === 'env'
+    ? 'Signing keys come from PC_KEYS, so the platform identity is stable across restarts and instances.'
+    : `Signing keys resolved from: ${S.health.key_source}.`;
   document.getElementById('chipMcp').textContent = `MCP ${S.health.mcp_protocol_versions[0]}`;
 
   await loadChain();
+
+  /* Re-opening the ledger must never be able to blank the page. A
+     proof whose preimage is withheld, lost or expired is a normal
+     outcome here, and a console that dies on one would hide exactly
+     the finding it exists to show. */
+  try {
+    await loadProofs();
+  } catch (e) {
+    S.composing = true;
+    setError('Could not re-open earlier proofs.',
+      ` ${e.message}. The ledger is unaffected — start a new query, or check the anchor registry.`);
+  }
+
   render();
   if(S.health.dev) devReload();
 })();

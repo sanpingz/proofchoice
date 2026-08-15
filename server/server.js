@@ -454,6 +454,13 @@ export function createHandler(ctx) {
       }
 
       let m;
+      /* Stored receipts for a proof, so a console can re-open one it
+       * did not create without re-requesting receipts (which would
+       * append a second batch to the chain). */
+      if ((m = /^\/receipts\/(.+)$/.exec(path)) && req.method === 'GET') {
+        const st = await ctx.getProof(m[1]);
+        return json(res, 200, { receipts: st.receipts ?? [], coverage: st.coverage ?? null });
+      }
       if ((m = /^\/verify\/(.+)$/.exec(path))) {
         const r = await callTool('pc_verify', { proof_id: m[1] }, ctx);
         return json(res, 200, r._data);
