@@ -22,7 +22,7 @@ import { join } from 'node:path';
 
 import { canon, sha256, merkleRoot, merklePath, merkleCheck, leavesFor } from './core.js';
 import { REGISTRY, Relayer, detectionProbability, sampleForTarget } from './registry.js';
-import { boot } from './server.js';
+import { boot, originAllowed } from './server.js';
 import { callTool } from './mcp.js';
 import { handleRpc, SUPPORTED_VERSIONS } from './mcp.js';
 import { FsStore, MemoryStore, BlobStore, storeFromEnv } from './store.js';
@@ -346,6 +346,44 @@ async function canonParity() {
 }
 
 /* ============================================================
+   3.6 — Origin validation
+   ------------------------------------------------------------
+   This regressed once already: the check allowed only localhost, so
+   the console worked locally and every POST it made returned 403 the
+   moment it was deployed. Browsers omit Origin on same-origin GETs
+   but send it on POSTs, which is why reads looked fine and writes
+   did not.
+   ============================================================ */
+
+async function origins() {
+  section('Origin validation');
+  const req = h => ({ headers: h });
+
+  eq(originAllowed(undefined, req({})), true, 'no Origin (ChatGPT, curl) is allowed');
+
+  eq(originAllowed('https://proofchoice.vercel.app', req({ host: 'proofchoice.vercel.app' })),
+     true, 'same-origin on a deployment is allowed');
+  eq(originAllowed('https://proofchoice.vercel.app',
+                   req({ 'x-forwarded-host': 'proofchoice.vercel.app', host: 'internal.local' })),
+     true, '   … matched against x-forwarded-host behind a proxy');
+  eq(originAllowed('http://localhost:8787', req({ host: 'localhost:8787' })),
+     true, 'same-origin locally is allowed');
+  eq(originAllowed('http://127.0.0.1:3000', req({ host: 'localhost:8787' })),
+     true, 'a loopback origin is allowed even on a different port');
+
+  eq(originAllowed('https://evil.example', req({ host: 'proofchoice.vercel.app' })),
+     false, 'a foreign origin is refused');
+  eq(originAllowed('not a url', req({ host: 'x' })), false, 'an unparseable Origin is refused');
+
+  const saved = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  process.env.VERCEL_PROJECT_PRODUCTION_URL = 'proofchoice.vercel.app';
+  eq(originAllowed('https://proofchoice.vercel.app', req({ host: 'preview-xyz.vercel.app' })),
+     true, 'the canonical production host is allowed from a preview deployment');
+  if (saved === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  else process.env.VERCEL_PROJECT_PRODUCTION_URL = saved;
+}
+
+/* ============================================================
    4 — storage adapters
    ============================================================ */
 
@@ -467,6 +505,7 @@ await goldenVectors();
 await acceptance();
 await protocol();
 await canonParity();
+await origins();
 await storage();
 await writeOnce();
 

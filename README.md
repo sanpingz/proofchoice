@@ -363,9 +363,15 @@ Dual-era on one endpoint, because clients in the wild are split:
   mismatches return `-32020`; unsupported versions return `-32022` with the supported list.
 - **Legacy** (`2025-11-25` and earlier) — `initialize` handshake, negotiated version echoed back.
 
-Era is selected by how the client opens. `Origin` is validated on every request, and the server binds
-to `127.0.0.1` by default. Responses are `application/json` unless the client asks only for
-`text/event-stream`; set `PC_FORCE_SSE=1` to always stream.
+Era is selected by how the client opens. Responses are `application/json` unless the client asks only
+for `text/event-stream`; set `PC_FORCE_SSE=1` to always stream.
+
+`Origin` is validated on every request, as the transport spec requires, and the server binds to
+`127.0.0.1` by default. Requests with **no** `Origin` — ChatGPT, curl, any server-to-server client —
+are allowed; **same-origin** requests are allowed by comparing the origin's host against the
+request's own host (`x-forwarded-host` first, so it works behind Vercel's proxy); loopback origins
+and the deployment's canonical hostnames are allowed. Anything else is refused with a `403` naming
+the offending origin. Add more with `PC_ALLOWED_ORIGINS`, or `*` to disable the check.
 
 ---
 

@@ -228,11 +228,41 @@ const json = (res, status, obj, headers = {}) => {
   res.end(body);
 };
 
-function originAllowed(origin) {
-  if (!origin) return true;                       // non-browser client
+/* Origin validation, required by the transport spec to stop a remote
+ * page driving a server on someone's private network.
+ *
+ * The rule that matters is SAME-ORIGIN: a page served by this very
+ * deployment is legitimate by definition. Checking only for localhost
+ * — as this did originally — works locally and then rejects the
+ * console's own POSTs the moment it is deployed anywhere, because the
+ * origin becomes https://<host> rather than http://localhost:8787.
+ *
+ * Browsers omit Origin on same-origin GETs but send it on POSTs, so
+ * the failure showed up only on writes. */
+export function originAllowed(origin, req = { headers: {} }) {
+  if (!origin) return true;                       // non-browser client: ChatGPT, curl
   if (ALLOWED_ORIGINS.includes('*')) return true;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
-  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+  let host;
+  try { host = new URL(origin).host.toLowerCase(); } catch { return false; }
+
+  /* Same-origin. Behind Vercel's proxy the forwarded host is the one
+   * the browser actually used. */
+  const h = req.headers ?? {};
+  const self = String(h['x-forwarded-host'] ?? h.host ?? '').toLowerCase();
+  if (self && host === self) return true;
+
+  /* Local development. */
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return true;
+
+  /* The deployment's own canonical hostnames, which differ from the
+   * request host on preview/branch URLs. */
+  for (const v of [process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL,
+                   process.env.VERCEL_PROJECT_PRODUCTION_URL]) {
+    if (v && host === String(v).toLowerCase()) return true;
+  }
+  return false;
 }
 
 const MIME = {
@@ -279,8 +309,19 @@ export function createHandler(ctx) {
     const path = url.pathname.replace(/^\/api(?=\/|$)/, '').replace(/\/+$/, '') || '/';
 
     /* DNS-rebinding protection, required by the transport spec. */
-    if (!originAllowed(req.headers.origin)) {
-      return json(res, 403, { jsonrpc: '2.0', error: { code: -32600, message: 'Origin not allowed' } });
+    if (!originAllowed(req.headers.origin, req)) {
+      return json(res, 403, {
+        jsonrpc: '2.0',
+        error: {
+          code: -32600,
+          message: `Origin not allowed: ${req.headers.origin}`,
+          data: {
+            request_host: req.headers['x-forwarded-host'] ?? req.headers.host ?? null,
+            hint: 'Same-origin requests are allowed automatically. To permit another origin, set ' +
+                  'PC_ALLOWED_ORIGINS to a comma-separated list (or "*" to disable the check).',
+          },
+        },
+      });
     }
 
     /* Dev reload channel. Stays open; no chain refresh needed. */
