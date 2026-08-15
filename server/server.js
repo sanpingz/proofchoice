@@ -381,6 +381,11 @@ export function createHandler(ctx) {
           mcp_protocol_versions: SUPPORTED_VERSIONS,
           mcp_endpoint: `${ctx.publicUrl}/mcp`,
           dev: DEV,
+          /* Unique per booted instance. Call /health twice: if this
+           * changes, more than one instance is serving you, and any
+           * non-shared store will lose proofs between requests. */
+          instance: ctx.sessionId,
+          anchors_visible: ctx.chain.blocks.filter(b => b.type === 'anchor').length,
           store: { kind: ctx.store.kind, persistent: ctx.store.persistent, shared: ctx.store.shared },
           key_source: ctx.keySource,
           platform_key_id: ctx.keys.platform.key_id,
@@ -462,6 +467,25 @@ export function createHandler(ctx) {
         return json(res, 200, { receipts: st.receipts ?? [], coverage: st.coverage ?? null });
       }
       if ((m = /^\/verify\/(.+)$/.exec(path))) {
+        /* A missing anchor is far more often "this instance has a
+         * different ledger" than "this proof is bad", and the two have
+         * completely different remedies. Answer with what THIS instance
+         * can actually see, so the difference is visible rather than
+         * inferred. */
+        if (!ctx.chain.anchorByProofId(m[1])) {
+          const anchors = ctx.chain.blocks.filter(b => b.type === 'anchor');
+          return json(res, 404, {
+            error: `no anchor for proof ID ${m[1]}`,
+            proof_id: m[1],
+            instance: ctx.sessionId,
+            store: { kind: ctx.store.kind, persistent: ctx.store.persistent, shared: ctx.store.shared },
+            anchors_visible: anchors.length,
+            newest_visible: anchors.length ? proofIdFor(anchors[anchors.length - 1].snapshot_hash) : null,
+            hint: ctx.store.persistent
+              ? 'This instance sees a persistent ledger. If the proof was anchored seconds ago, check every instance points at the SAME store.'
+              : `The store is "${ctx.store.kind}": erased on restart and not shared between instances, so a proof anchored on one request can be invisible to the next. Attach Redis.`,
+          });
+        }
         const r = await callTool('pc_verify', { proof_id: m[1] }, ctx);
         return json(res, 200, r._data);
       }
