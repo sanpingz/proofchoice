@@ -21,15 +21,25 @@ import { canon, signMsg, sha256, merkleRoot } from './core.js';
 /** The independent registry. Prices and commissions here are the
  *  ground truth a platform could prune from — the auditor never
  *  sees this table, only the signed receipts it produces. */
+/* SUP-01 is deliberately the cheapest supplier, the highest-scoring
+ * one, AND the one paying no commission. That is what makes pruning
+ * it the sharpest possible test: the platform drops the candidate
+ * that is best for the buyer and worst for its own revenue, and the
+ * baseline layer still attests perfectly to what remains.
+ *
+ * Changing these names or prices is safe. Changing the ORDERING —
+ * SUP-01 cheapest, scores descending by id, commissions on 02/05/06/
+ * 07/08 — is not: the acceptance scenarios in Design.md §8 depend on
+ * it. */
 export const REGISTRY = [
-  { id: 'SUP-01', name: 'Northwind Lodge',    price: 2610, score: 88, comm: 0  },
-  { id: 'SUP-02', name: 'Horizon Bay Resort', price: 3420, score: 86, comm: 8  },
-  { id: 'SUP-03', name: 'Lantern Court',      price: 2940, score: 84, comm: 0  },
-  { id: 'SUP-04', name: 'Sunset Boutique',    price: 2750, score: 81, comm: 0  },
-  { id: 'SUP-05', name: 'Palm & Stone',       price: 3100, score: 79, comm: 5  },
-  { id: 'SUP-06', name: 'Cassia Grand',       price: 3760, score: 76, comm: 10 },
-  { id: 'SUP-07', name: 'Meridian Suites',    price: 4150, score: 74, comm: 12 },
-  { id: 'SUP-08', name: 'Aurora Phuket',      price: 3980, score: 71, comm: 12 },
+  { id: 'SUP-01', name: 'Kowloon Bay Lodge',   price: 1180, score: 88, comm: 0  },
+  { id: 'SUP-02', name: 'Harbourview Central', price: 1540, score: 86, comm: 8  },
+  { id: 'SUP-03', name: 'Lantern Court',       price: 1320, score: 84, comm: 0  },
+  { id: 'SUP-04', name: 'Sheung Wan Boutique', price: 1240, score: 81, comm: 0  },
+  { id: 'SUP-05', name: 'Peak & Stone',        price: 1410, score: 79, comm: 5  },
+  { id: 'SUP-06', name: 'Nathan Grand',        price: 1690, score: 76, comm: 10 },
+  { id: 'SUP-07', name: 'Star Ferry Suites',   price: 1870, score: 74, comm: 12 },
+  { id: 'SUP-08', name: 'Aurora Causeway',     price: 1790, score: 71, comm: 12 },
 ];
 
 export const bySupplierId = id => REGISTRY.find(s => s.id === id) ?? null;

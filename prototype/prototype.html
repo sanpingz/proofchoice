@@ -308,20 +308,20 @@ async function verifyMsg(pub,msg,sigHex){
    Fixed world
    ============================================================ */
 
-const QUERY = 'Annual room-block framework · Phuket · 4-star+ · 120 room-nights/month';
+const QUERY = 'Annual room-block framework · Hong Kong · 4-star+ · 120 room-nights/month';
 const RULE_ID = 'rr.value-weighted.v2';
 
 /* The independent category registry. The auditor samples from THIS,
    never from the candidate set the platform declares. */
 const REGISTRY = [
-  {id:'SUP-01', name:'Northwind Lodge',    price:2610, score:88, comm:0},
-  {id:'SUP-02', name:'Horizon Bay Resort', price:3420, score:86, comm:8},
-  {id:'SUP-03', name:'Lantern Court',      price:2940, score:84, comm:0},
-  {id:'SUP-04', name:'Sunset Boutique',    price:2750, score:81, comm:0},
-  {id:'SUP-05', name:'Palm & Stone',       price:3100, score:79, comm:5},
-  {id:'SUP-06', name:'Cassia Grand',       price:3760, score:76, comm:10},
-  {id:'SUP-07', name:'Meridian Suites',    price:4150, score:74, comm:12},
-  {id:'SUP-08', name:'Aurora Phuket',      price:3980, score:71, comm:12}
+  {id:'SUP-01', name:'Kowloon Bay Lodge',   price:1180, score:88, comm:0},
+  {id:'SUP-02', name:'Harbourview Central', price:1540, score:86, comm:8},
+  {id:'SUP-03', name:'Lantern Court',       price:1320, score:84, comm:0},
+  {id:'SUP-04', name:'Sheung Wan Boutique', price:1240, score:81, comm:0},
+  {id:'SUP-05', name:'Peak & Stone',        price:1410, score:79, comm:5},
+  {id:'SUP-06', name:'Nathan Grand',        price:1690, score:76, comm:10},
+  {id:'SUP-07', name:'Star Ferry Suites',   price:1870, score:74, comm:12},
+  {id:'SUP-08', name:'Aurora Causeway',     price:1790, score:71, comm:12}
 ];
 
 const ROLES = [
@@ -333,7 +333,7 @@ const ROLES = [
 ];
 
 const ADVERSARY = [
-  {id:'prune',   t:'Drop the cheapest candidate', d:'Platform removes Northwind Lodge before the snapshot is built.'},
+  {id:'prune',   t:'Drop the cheapest candidate', d:'Platform removes Kowloon Bay Lodge before the snapshot is built.'},
   {id:'tamper',  t:'Edit evidence after anchoring', d:'Platform rewrites the stored snapshot once the anchor is on chain.'},
   {id:'withhold',t:'Withhold the evidence blob',   d:'Platform refuses to serve the off-chain preimage to the auditor.'},
   {id:'legacy',  t:'Legacy receipt routing',       d:'Receipts flow through the platform instead of the neutral relayer.'},
@@ -629,7 +629,7 @@ V.agent = () => {
   <div class="card">
     <div class="klabel">Stage 1 · candidate pool as the agent assembled it</div>
     ${S.stage>=1?`<table><thead><tr><th>ID</th><th>Supplier</th><th>Unit price</th><th>Score</th><th>Commission</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    ${S.adv.prune?`<div class="note">Northwind Lodge — the cheapest supplier, paying no commission — was removed before the snapshot. The baseline layer will attest perfectly to the pool that remains. Nothing in stages 2–4 can detect this.</div>`:''}`
+    ${S.adv.prune?`<div class="note">Kowloon Bay Lodge — the cheapest supplier, paying no commission — was removed before the snapshot. The baseline layer will attest perfectly to the pool that remains. Nothing in stages 2–4 can detect this.</div>`:''}`
     :`<div class="empty">No pool yet. Start from the Buyer role.</div>`}
   </div>
 

@@ -65,8 +65,8 @@ function canon(o){
 ```jsonc
 {
   "id": "SUP-01",
-  "name": "Northwind Lodge",
-  "unit_price_cny": 2610,
+  "name": "Kowloon Bay Lodge",
+  "unit_price_cny": 1180,
   "commission_disclosed": false,   // binary only — never the rate, never the amount
   "salt": "<uuid v4, per candidate, per snapshot>"
 }

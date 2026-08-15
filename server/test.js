@@ -111,7 +111,7 @@ async function goldenVectors() {
    2 — scenarios
    ============================================================ */
 
-const QUERY = 'Annual room-block framework · Phuket · 4-star+ · 120 room-nights/month';
+const QUERY = 'Annual room-block framework · Hong Kong · 4-star+ · 120 room-nights/month';
 
 async function scenario({
   custody_model = 'platform-held',

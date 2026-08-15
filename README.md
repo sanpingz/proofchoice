@@ -510,7 +510,7 @@ curl --noproxy '*' localhost:8787/registry
 curl --noproxy '*' localhost:8787/chain
 
 curl --noproxy '*' -X POST localhost:8787/attest -H 'content-type: application/json' -d '{
-  "query": "Annual room-block framework - Phuket - 4-star+ - 120 room-nights/month",
+  "query": "Annual room-block framework - Hong Kong - 4-star+ - 120 room-nights/month",
   "candidate_ids": ["SUP-02","SUP-03","SUP-04","SUP-05","SUP-06","SUP-07","SUP-08"],
   "winner_id": "SUP-02",
   "custody_model": "hybrid"
