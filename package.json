@@ -20,8 +20,5 @@
   "dependencies": {
     "@vercel/blob": "^2.8.0",
     "redis": "^6.2.1"
-  },
-  "devDependencies": {
-    "vercel": "^59.1.3"
   }
 }
