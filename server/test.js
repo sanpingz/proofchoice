@@ -289,6 +289,63 @@ async function protocol() {
 }
 
 /* ============================================================
+   3.5 — canon() parity across implementations
+   ------------------------------------------------------------
+   canon() exists three times: in server/core.js, inlined in the
+   offline prototype, and inlined in the console. The console's
+   whole claim is that it verifies the server INDEPENDENTLY rather
+   than displaying its verdict — which is worth nothing if the two
+   canonicalisers have quietly drifted apart.
+
+   Compared by BEHAVIOUR, not by text: the copies are formatted
+   differently on purpose and a string comparison would fail for
+   reasons that do not matter.
+   ============================================================ */
+
+async function canonParity() {
+  section('canon() parity — server vs console vs prototype');
+
+  const { readFileSync, existsSync } = await import('node:fs');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+  const CANDIDATES = {
+    server: ['server/core.js'],
+    console: ['public/index.html'],
+    prototype: ['prototype/prototype.html', 'prototype.html'],
+  };
+
+  const impls = {};
+  for (const [name, paths] of Object.entries(CANDIDATES)) {
+    const found = paths.map(p => join(root, p)).find(existsSync);
+    eq(!!found, true, `${name}: found a canon() source`);
+    if (!found) continue;
+    const m = readFileSync(found, 'utf8').match(/(?:export )?function canon\(o\)\s*\{[\s\S]*?\n\}/);
+    eq(!!m, true, `${name}: canon() is extractable`);
+    if (m) impls[name] = eval('(' + m[0].replace(/^export /, '') + ')');
+  }
+
+  const cases = [
+    null, 0, -1, 1.5, true, false, '', 'a"b', '中文', [], {}, [1, [2, [3]]],
+    { b: 1, a: 2 }, { z: { y: 1, x: 2 }, a: [{ n: 1, m: 2 }] },
+    { '': 1, '0': 2, A: 3, a: 4 },
+    { k: null, arr: [null, true, 'x'] },
+    { schema_version: 'pc.snapshot.v1', candidate_count: 8,
+      commercial_disclosure: { paid_placement: false, disclosed_supplier_ids: ['SUP-02', 'SUP-05'] },
+      winner_id: 'SUP-01' },
+  ];
+
+  let disagreements = 0;
+  for (const c of cases) {
+    const outs = Object.values(impls).map(f => f(c));
+    if (new Set(outs).size !== 1) disagreements++;
+  }
+  eq(disagreements, 0, `all implementations agree on ${cases.length} cases (unicode, empty keys, nesting, arrays)`);
+  eq(impls.server?.({ b: 1, a: 2 }), '{"a":2,"b":1}', 'and still match the pinned golden vector');
+}
+
+/* ============================================================
    4 — storage adapters
    ============================================================ */
 
@@ -376,6 +433,7 @@ section('ProofChoice acceptance suite');
 await goldenVectors();
 await acceptance();
 await protocol();
+await canonParity();
 await storage();
 await writeOnce();
 

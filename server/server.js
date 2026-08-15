@@ -29,7 +29,9 @@
    ============================================================ */
 
 import { createServer } from 'node:http';
-import { join, dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { newKey, exportKeyPair, importKeyPair, proofIdFor } from './core.js';
@@ -42,6 +44,9 @@ import { handleRpc, callTool, SERVER_INFO, SUPPORTED_VERSIONS } from './mcp.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.PC_DATA ?? join(HERE, 'data');
+/* The console. On Vercel this directory is served statically before
+ * any rewrite reaches the function, so these routes are local-only. */
+const PUBLIC = resolve(HERE, '..', 'public');
 const PORT = Number(process.env.PC_PORT ?? 8787);
 const HOST = process.env.PC_HOST ?? '127.0.0.1';
 const FORCE_SSE = process.env.PC_FORCE_SSE === '1';
@@ -179,6 +184,28 @@ function originAllowed(origin) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png',
+};
+
+/** Serve a file from public/, refusing anything that resolves outside
+ *  it. Returns false when there is nothing to serve. */
+async function serveStatic(res, path) {
+  const rel = path === '/' ? '/index.html' : path;
+  const file = resolve(PUBLIC, '.' + rel);
+  if (!file.startsWith(PUBLIC + '/') && file !== PUBLIC) return false;
+  if (!existsSync(file)) return false;
+  const body = await readFile(file);
+  res.writeHead(200, {
+    'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+    'cache-control': 'no-cache',
+  });
+  res.end(body);
+  return true;
+}
+
 async function readBody(req) {
   if (req.body !== undefined && req.body !== null) {
     return typeof req.body === 'string' ? JSON.parse(req.body) : req.body;   // Vercel pre-parses
@@ -296,6 +323,27 @@ export function createHandler(ctx) {
         return json(res, 200, r._data);
       }
 
+      /* Adversary switches. Simulated holders, not real outages — the
+       * console labels them as such. */
+      if (path === '/custody-control' && req.method === 'POST') {
+        const b = await readBody(req);
+        await callTool('pc_custody_control', b, ctx);
+        return json(res, 200, { mode: ctx.custody.mode, clock_offset_ms: ctx.custody.clockOffsetMs });
+      }
+
+      if (path === '/reset' && req.method === 'POST') {
+        ctx.custody.reset();
+        return json(res, 200, { mode: ctx.custody.mode, note: 'Adversary switches cleared. The append-only log is unchanged — that is the point of an append-only log.' });
+      }
+
+      if (path === '/detection') {
+        const q = k => (url.searchParams.get(k) == null ? undefined : Number(url.searchParams.get(k)));
+        const r = await callTool('pc_detection_math', {
+          n: q('n'), k: q('k'), s: q('s'), proofs: q('proofs'), target: q('target'),
+        }, ctx);
+        return json(res, 200, r._data);
+      }
+
       let m;
       if ((m = /^\/verify\/(.+)$/.exec(path))) {
         const r = await callTool('pc_verify', { proof_id: m[1] }, ctx);
@@ -321,11 +369,15 @@ export function createHandler(ctx) {
         return s ? json(res, 200, s) : json(res, 404, { error: 'unknown supplier' });
       }
 
+      /* The console. Last, so an API route always wins over a file. */
+      if (req.method === 'GET' && await serveStatic(res, path)) return;
+
       if (path === '/') {
         return json(res, 200, {
           server: SERVER_INFO,
           mcp_endpoint: `${ctx.publicUrl}/mcp`,
-          rest: ['/health', '/registry', '/chain', '/attest', '/receipts', '/verify/:proof_id', '/evidence/:proof_id', '/proof/:proof_id'],
+          console: 'public/index.html not found — the console is not deployed',
+          rest: ['/health', '/registry', '/chain', '/attest', '/receipts', '/verify/:proof_id', '/evidence/:proof_id', '/proof/:proof_id', '/custody-control', '/reset', '/detection'],
         });
       }
 
@@ -357,7 +409,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`  not a blockchain. Do not describe it as one.\n`);
     if (!ctx.publicUrl.startsWith('https://')) {
       console.log(`  ChatGPT needs a public HTTPS URL — deploy to Vercel or run a tunnel.`);
-      console.log(`  See server/README.md § Deploying to Vercel.\n`);
+      console.log(`  See README.md § Deploying to Vercel.\n`);
     }
   });
 }

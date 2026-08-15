@@ -34,7 +34,7 @@ export default async function handler(req, res) {
     res.end(JSON.stringify({
       error: 'boot failed',
       message: err.message,
-      hint: 'Check KV_REST_API_URL / KV_REST_API_TOKEN and PC_KEYS. See server/README.md § Deploying to Vercel.',
+      hint: 'Check KV_REST_API_URL / KV_REST_API_TOKEN and PC_KEYS. See README.md § Deploying to Vercel.',
     }, null, 2));
   }
 }

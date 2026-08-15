@@ -3,8 +3,9 @@
 # from the PC_KEYS environment variable and the ledger from KV.
 server/data/
 
-# Working documents, not needed at runtime.
+# Working documents and the offline prototype — not needed at runtime.
+# public/ holds the console that IS served.
 Design.md
-MEMO-01-custody-and-schema.md
+prototype/
 
 .DS_Store
