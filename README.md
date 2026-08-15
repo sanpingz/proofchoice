@@ -292,6 +292,18 @@ itself be the finding — which is the argument the product makes, so the UI had
 - **Honest disclosure banner** driven by `/health`: it turns amber and names the problem when the
   store is ephemeral or the signing keys are.
 
+### Icons
+
+`npm run icons` regenerates the whole set into `public/` from `brand/proofchoice-master.png`:
+favicon (16/32 PNG plus a 16/32/48 `.ico`), a 96px masthead mark, a 180px apple-touch-icon, and
+192/512 manifest icons. It needs ImageMagick, but only to *generate* — the generated files are what
+ship, and nothing is fetched from a third party at runtime.
+
+Two details worth keeping if you re-cut them: the apple-touch-icon is **flattened onto the navy**,
+because iOS applies its own squircle mask and transparent rounded corners would mask to pale slivers;
+and the large icons are palette-reduced, which measures ~0.6% RMSE on this artwork — imperceptible —
+and takes the set from ~400K to 128K. Only `logo.png` (12K) is on the page-load path.
+
 ---
 
 ## MCP and ChatGPT
@@ -599,6 +611,8 @@ mode excluded from the acceptance rows.
 | --- | --- |
 | [server/](server/) | The implementation. Zero dependencies |
 | [public/index.html](public/index.html) | Browser console, served at `/` |
+| [public/](public/) | Console plus the icon set — favicon, apple-touch-icon, manifest icons |
+| [brand/](brand/) | Master artwork and `generate.sh`. Not deployed |
 | [api/](api/) | Vercel serverless entry point |
 | [Design.md](Design.md) | Build spec: data contracts (§3), stages (§4), verification (§5), open questions (§7), acceptance tests (§8) |
 | [prototype/prototype.html](prototype/prototype.html) | The original single-file prototype. Fully offline, simulated ledger. Still the reference for §8 behaviour |

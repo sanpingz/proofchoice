@@ -12,3 +12,6 @@ prototype/
 
 # Installed at build time from package.json.
 node_modules/
+
+# Brand master artwork — assets are generated into public/.
+brand/

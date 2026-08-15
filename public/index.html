@@ -4,6 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>ProofChoice — Server console</title>
+
+<!-- Icons. Absolute paths resolve identically in both deployments:
+     public/ is the static root on Vercel, and serveStatic maps the
+     same paths locally. All local files — no CDN, nothing to fetch
+     from a third party. -->
+<link rel="icon" href="/favicon.ico" sizes="48x48" />
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+<link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<link rel="manifest" href="/site.webmanifest" />
+<meta name="theme-color" content="#001758" />
+<meta name="description" content="Evidence layer for AI agent recommendations. Commits the candidate set, ranking rule, commission disclosure and winner to a hash, signs it, and anchors it." />
 <!--
   Console for the ProofChoice server.
 
@@ -45,6 +57,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 
 /* ---------- masthead ---------- */
 .masthead{border-bottom:1px solid var(--wire);background:var(--card);padding:14px 22px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+/* The mark carries its own rounded tile and background, so it needs
+   no frame here and reads the same on light or dark. alt="" because
+   the wordmark beside it already names the product. */
+.brand{display:flex;align-items:center;gap:9px}
+.brand .mark{width:26px;height:26px;display:block;flex:none}
 .wordmark{font-weight:700;font-size:17px;letter-spacing:-.02em}
 .wordmark span{color:var(--seal)}
 .masthead .sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--slate2)}
@@ -180,7 +197,10 @@ input[type=text]{width:100%;font-family:var(--mono);font-size:12.5px;padding:9px
 <body>
 
 <div class="masthead">
-  <div class="wordmark">PROOF<span>CHOICE</span></div>
+  <div class="brand">
+    <img class="mark" src="/logo.png" alt="" width="26" height="26" decoding="async" />
+    <div class="wordmark">PROOF<span>CHOICE</span></div>
+  </div>
   <div class="sub">Server console</div>
   <div class="spacer"></div>
   <div class="chip" id="chipStore">store …</div>
