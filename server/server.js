@@ -44,8 +44,9 @@ import { handleRpc, callTool, SERVER_INFO, SUPPORTED_VERSIONS } from './mcp.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.PC_DATA ?? join(HERE, 'data');
-/* The console. On Vercel this directory is served statically before
- * any rewrite reaches the function, so these routes are local-only. */
+/* The marketing site (index.html) and the console (demo.html). On
+ * Vercel this directory is served statically before any rewrite
+ * reaches the function, so these routes are local-only. */
 const PUBLIC = resolve(HERE, '..', 'public');
 const PORT = Number(process.env.PC_PORT ?? 8787);
 const HOST = process.env.PC_HOST ?? '127.0.0.1';
@@ -278,11 +279,17 @@ const MIME = {
 };
 
 /** Serve a file from public/, refusing anything that resolves outside
- *  it. Returns false when there is nothing to serve. */
+ *  it. Returns false when there is nothing to serve.
+ *
+ *  Extension-less paths fall back to `<path>.html`, so /demo serves
+ *  public/demo.html. Vercel does the same through the explicit rewrite
+ *  in vercel.json rather than through this code — public/ is served
+ *  statically there, before any request reaches the function. */
 async function serveStatic(res, path) {
   const rel = path === '/' ? '/index.html' : path;
-  const file = resolve(PUBLIC, '.' + rel);
+  let file = resolve(PUBLIC, '.' + rel);
   if (!file.startsWith(PUBLIC + '/') && file !== PUBLIC) return false;
+  if (!existsSync(file) && !extname(file) && existsSync(file + '.html')) file += '.html';
   if (!existsSync(file)) return false;
   const body = await readFile(file);
   res.writeHead(200, {
@@ -572,7 +579,7 @@ export function createHandler(ctx) {
         return json(res, 200, {
           server: SERVER_INFO,
           mcp_endpoint: `${ctx.publicUrl}/mcp`,
-          console: 'public/index.html not found — the console is not deployed',
+          console: 'public/index.html not found — the site is not deployed',
           rest: ['/health', '/registry', '/chain', '/attest', '/receipts', '/verify/:proof_id', '/evidence/:proof_id', '/proof/:proof_id', '/custody-control', '/reset', '/detection'],
         });
       }

@@ -2,7 +2,7 @@
    ProofChoice — cryptographic core
    ------------------------------------------------------------
    PORTED VERBATIM from prototype/prototype.html, and mirrored again
-   in public/index.html so the console can verify independently.
+   in public/demo.html so the console can verify independently.
    All three must agree byte-for-byte. This file is the single
    most security-critical thing in the repository.
 

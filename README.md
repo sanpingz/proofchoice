@@ -45,8 +45,8 @@ Node 20+ (developed on 26). No bundler, no framework — the scripts are plain `
 all, and most of the test suite passes without either. Run `npm install` when deploying against a
 real store.
 
-Open <http://127.0.0.1:8787/> for the console. A local HTTP proxy will intercept `localhost` from
-curl — pass `--noproxy '*'` if you have one.
+Open <http://127.0.0.1:8787/> for the landing page and <http://127.0.0.1:8787/demo> for the console.
+A local HTTP proxy will intercept `localhost` from curl — pass `--noproxy '*'` if you have one.
 
 ### Dev mode
 
@@ -118,9 +118,10 @@ function canon(o){
 }
 ```
 
-It exists in three places — the server, the console, and the offline prototype — and the test suite
-compares all three by behaviour, because the console's independent-verification claim is worthless if
-they have quietly drifted apart.
+It exists in four places — the server, the console, the landing page and the offline prototype — and
+the test suite compares all four by behaviour, because the console's independent-verification claim
+is worthless if they have quietly drifted apart, and a landing page showing a hash the server would
+not produce is a lie in the shop window.
 
 ---
 
@@ -268,8 +269,14 @@ numbers.
 
 ## The console
 
-[public/index.html](public/index.html) is served at `/`. Single file, no build, no webfont — one
+[public/demo.html](public/demo.html) is served at `/demo`. Single file, no build, no webfont — one
 network dependency fewer than the prototype.
+
+`/` is the landing page ([public/index.html](public/index.html)), so the first thing a visitor meets
+is what the product claims and — as prominently — what it refuses to claim, rather than an operator
+console with adversary switches in the sidebar. Extension-less paths fall back to `<path>.html`
+locally; on Vercel an explicit rewrite in `vercel.json` does the same, since `public/` is served
+statically there before any request reaches the function.
 
 It is not a second simulation. Every hash, signature and anchor it shows was produced by the server
 and persisted. But it does not simply display the server's verdict either: the page carries the same
@@ -675,8 +682,9 @@ mode excluded from the acceptance rows.
 | Path | What it is |
 | --- | --- |
 | [server/](server/) | The implementation. Zero dependencies |
-| [public/index.html](public/index.html) | Browser console, served at `/` |
-| [public/](public/) | Console plus the icon set — favicon, apple-touch-icon, manifest icons |
+| [public/index.html](public/index.html) | Landing page, served at `/`. Carries its own pinned `canon()` — the hero widget hashes a live snapshot |
+| [public/demo.html](public/demo.html) | Browser console, served at `/demo` |
+| [public/](public/) | Landing page, console, and the icon set — favicon, apple-touch-icon, manifest icons |
 | [brand/](brand/) | Master artwork and `generate.sh`. Not deployed |
 | [api/](api/) | Vercel serverless entry point |
 | [Design.md](Design.md) | Build spec: data contracts (§3), stages (§4), verification (§5), open questions (§7), acceptance tests (§8) |

@@ -3,1406 +3,1067 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ProofChoice — Server console</title>
+<title>ProofChoice — an evidence layer for AI agent recommendations</title>
 
-<!-- Icons. Absolute paths resolve identically in both deployments:
-     public/ is the static root on Vercel, and serveStatic maps the
-     same paths locally. All local files — no CDN, nothing to fetch
-     from a third party. -->
 <link rel="icon" href="/favicon.ico" sizes="48x48" />
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
 <link rel="icon" href="/favicon-16.png" type="image/png" sizes="16x16" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 <link rel="manifest" href="/site.webmanifest" />
 <meta name="theme-color" content="#001758" />
-<meta name="description" content="Evidence layer for AI agent recommendations. Commits the candidate set, ranking rule, commission disclosure and winner to a hash, signs it, and anchors it." />
+<meta name="description" content="An AI agent recommends a supplier. ProofChoice commits the candidate set, the ranking rule, the commission disclosure and the winner to a hash, signs it, and anchors it where the agent cannot later edit it." />
+<meta property="og:title" content="ProofChoice — an evidence layer for AI agent recommendations" />
+<meta property="og:description" content="Commit the candidate set. Sign it. Anchor it. Then ask every supplier in the registry whether they were really asked." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/icon-512.png" />
+<meta name="twitter:card" content="summary" />
+
 <!--
-  Console for the ProofChoice server.
+  The front of house.
 
-  Unlike prototype.html this is NOT a simulation: every hash, signature
-  and anchor shown here was produced by the server and persisted. The
-  page holds no secrets and signs nothing.
+  Everything claimed on this page is bounded the same way the product
+  is: ProofChoice makes denial expensive, it does not make lying
+  impossible. If a line here ever implies otherwise, that line is a bug
+  — see the "What it cannot do" section, which is deliberately as
+  prominent as the one above it.
 
-  It does, however, RECOMPUTE. canon() below is the same pinned function
-  the server uses, and the auditor view re-derives the snapshot hash in
-  your browser from the served evidence rather than believing the
-  server's verdict. That is the whole point of the product, so the UI
-  had better do it too.
-
-  No webfont, no CDN, no build step. System font stack only.
+  Single file. No webfont, no CDN, no build step, no analytics. The
+  live commitment widget below runs real WebCrypto against the same
+  canon() the server uses, because a page selling verifiability that
+  faked its own hashes would be an odd thing to ship.
 -->
 <style>
 :root{
   --ink:#10151C; --ink2:#1A222C; --ink3:#28323E;
   --paper:#F7F8F6; --card:#FFFFFF;
   --wire:#D9DEDA; --wire2:#E9ECE9;
-  /* Contrast is measured, not eyeballed. --slate2 carries most of the
-     9.5-12px label type, so it has to clear 4.5:1 on white: #8A939B
-     was 3.12, #6E7780 is 4.55. --dim is the same job on the dark
-     strip and rail panels, where #54626F was 2.93 on --ink. */
   --slate:#5B6670; --slate2:#6E7780; --dim:#798794;
-  --seal:#1F4B3F; --seal-lite:#E4EDE7;
+  --seal:#1F4B3F; --seal-lite:#E4EDE7; --seal-bright:#4E9E7E;
   --amber:#9A5B12; --amber-lite:#F6EDE0;
   --fault:#A8321E; --fault-lite:#F7E6E2;
-  /* INCONCLUSIVE — a fourth verdict token. Deliberately not amber:
-     an expired retention period is not a partial pass. */
-  --info:#2A4A63;  --info-lite:#E3EAEF;
+  --info:#2A4A63; --info-lite:#E3EAEF;
   --r:3px;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
 }
 *{box-sizing:border-box}
+html{scroll-behavior:smooth}
 html,body{margin:0;padding:0}
-body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
 button,select,input{font-family:inherit;font-size:inherit}
 button{cursor:pointer}
-button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
-.disp{font-weight:700;letter-spacing:-.02em}
+a{color:var(--seal);text-decoration:none}
+a:hover{text-decoration:underline}
+button:focus-visible,a:focus-visible{outline:2px solid var(--seal-bright);outline-offset:3px;border-radius:2px}
+h1,h2,h3{letter-spacing:-.025em;margin:0}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+/* A grid item defaults to min-width:auto, so one wide child — a <pre>
+   of canonical JSON, a hash that cannot break — widens its whole
+   column and scrolls the document sideways. Every grid on this page
+   opts out; the scrolling belongs to the <pre>, not to the body. */
+.hero .wrap > *,.problem > *,.stages > *,.two > *,.detect > *,.who3 > *,.integrate > *,.tiers > *,.fgrid > *{min-width:0}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--slate2)}
+.eyebrow.on-dark{color:var(--dim)}
+.lede{font-size:16.5px;color:var(--slate);max-width:62ch;margin:12px 0 0}
 
-/* ---------- masthead ---------- */
-.masthead{border-bottom:1px solid var(--wire);background:var(--card);padding:14px 22px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-/* The mark carries its own rounded tile and background, so it needs
-   no frame here and reads the same on light or dark. alt="" because
-   the wordmark beside it already names the product. */
-.brand{display:flex;align-items:center;gap:9px}
-.brand .mark{width:26px;height:26px;display:block;flex:none}
+/* ---------- nav ---------- */
+.nav{position:sticky;top:0;z-index:20;background:rgba(247,248,246,.86);backdrop-filter:saturate(160%) blur(10px);
+  border-bottom:1px solid var(--wire)}
+.nav .inner{max-width:1080px;margin:0 auto;padding:11px 24px;display:flex;align-items:center;gap:26px}
+.brand{display:flex;align-items:center;gap:9px;color:inherit}
+.brand:hover{text-decoration:none;opacity:.75}
+.brand img{width:27px;height:27px;display:block;flex:none}
 .wordmark{font-weight:700;font-size:17px;letter-spacing:-.02em}
 .wordmark span{color:var(--seal)}
-.masthead .sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--slate2)}
-.masthead .spacer{flex:1}
-.chip{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;border:1px solid var(--wire);border-radius:var(--r);padding:3px 8px;color:var(--slate);background:var(--paper)}
-.chip.warn{border-color:#E5D0B4;background:var(--amber-lite);color:var(--amber)}
-.chip.bad{border-color:#E7C3BA;background:var(--fault-lite);color:var(--fault)}
+.navlinks{display:flex;gap:22px;margin-left:8px}
+.navlinks a{color:var(--slate);font-size:13.5px;font-weight:500}
+.navlinks a:hover{color:var(--ink);text-decoration:none}
+.nav .spacer{flex:1}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:var(--r);padding:9px 16px;font-weight:600;font-size:14px;
+  border:1px solid var(--ink);background:var(--ink);color:#fff;line-height:1.2}
+.btn:hover{background:var(--ink2);text-decoration:none;color:#fff}
+.btn.sm{padding:7px 13px;font-size:13px}
+.btn.ghost{background:none;color:var(--ink);border-color:var(--wire)}
+.btn.ghost:hover{border-color:var(--slate);background:none;color:var(--ink)}
+.btn.on-dark{background:#fff;border-color:#fff;color:var(--ink)}
+.btn.on-dark:hover{background:#E9EFEB;color:var(--ink)}
+.btn.ghost.on-dark{background:none;color:#EDF1F3;border-color:#3B4854}
+.btn.ghost.on-dark:hover{border-color:#7F8E9C;color:#fff}
+.btn .arr{font-family:var(--mono);font-size:12px;opacity:.7}
+@media(max-width:860px){.navlinks{display:none}}
 
-/* ---------- disclosure banner ---------- */
-/* Only rendered when there is something to disclose — an ephemeral
-   store or ephemeral keys. The standing "cryptography is real, the
-   ledger is a single-operator log" note is not a warning and does not
-   need a permanent banner; it lives on the store chip's tooltip, in
-   the anchor-registry view, and in GET /health. */
-.disclose{background:var(--amber-lite);border-bottom:1px solid #E5D0B4;padding:10px 22px;font-size:12.5px;color:#5C3A0B}
-.disclose b{display:block;font-size:12.5px;margin-bottom:2px}
-.disclose:empty{display:none}
+/* ---------- hero ---------- */
+.hero{background:var(--ink);color:#EDF1F3;padding:76px 0 70px;position:relative;overflow:hidden}
+/* Faint ledger rule — the visual metaphor of the whole product, at 4% */
+.hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(to bottom,rgba(255,255,255,.045) 1px,transparent 1px);background-size:100% 34px}
+.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center}
+.hero h1{font-size:47px;line-height:1.06;font-weight:700;margin:14px 0 0;color:#fff}
+.hero h1 em{font-style:normal;color:var(--seal-bright)}
+.hero .sub{font-size:17px;color:#B4C0C9;max-width:52ch;margin:18px 0 0}
+.hero .cta{display:flex;gap:11px;flex-wrap:wrap;margin-top:28px}
+.hero .under{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:20px;letter-spacing:.03em}
+.hero .under b{color:#9FADB9;font-weight:500}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr;gap:36px}.hero h1{font-size:36px}.hero{padding:52px 0 54px}}
 
-/* ---------- custody strip ---------- */
-.strip{background:var(--ink);padding:15px 22px 17px;overflow-x:auto}
-.strip-hd{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
-.custody{display:flex;align-items:stretch;gap:0;min-width:1080px}
-/* Each stage is a button: the strip is the organising element, so it
-   navigates to the role that owns that stage rather than only
-   reporting on it. */
-.seg{flex:1;position:relative;padding:0 16px 0 0;background:none;border:0;font:inherit;color:inherit;text-align:left;display:block}
-.seg:last-child{padding-right:0}
-.seg[data-goto]{cursor:pointer}
-.seg[data-goto]:hover .lb{color:#FFF}
-.seg[data-goto]:hover .bar{border-color:#7F8E9C}
-.seg:focus-visible{outline:2px solid #8FB8A6;outline-offset:3px;border-radius:2px}
-/* Proof switcher. One chip per chain of custody, newest first. */
-.proofbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
-.plabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-right:4px}
-.pchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;
-  padding:4px 9px;border-radius:2px;border:1px solid #2E3A47;background:var(--ink2);color:#9FADB9}
-button.pchip{cursor:pointer}
-button.pchip:hover{border-color:#54626F;color:#DCE4EA}
-.pchip.on{border-color:#6C8B7C;background:#1A2A24;color:#EAF2ED}
-.pchip .pdot{width:7px;height:7px;border-radius:50%;background:#54626F;flex:none}
-.pchip.done .pdot{background:#4E9E7E} .pchip.warn .pdot{background:var(--amber)}
-.pchip.bad .pdot{background:var(--fault)} .pchip.info .pdot{background:#5C7F99}
-.pchip.draft{border-style:dashed}
-.pchip:focus-visible{outline:2px solid #8FB8A6;outline-offset:2px}
+/* ---------- live commitment widget ---------- */
+.widget{background:var(--ink2);border:1px solid #2E3A47;border-radius:5px;overflow:hidden}
+.widget .wh{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid #2E3A47;background:#151D26}
+.widget .wh .t{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.widget .wh .live{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--seal-bright)}
+.widget .wh .live i{width:6px;height:6px;border-radius:50%;background:var(--seal-bright);display:block}
+.widget .body{padding:13px 14px 15px}
+.widget .cap{font-size:11.5px;color:var(--dim);margin:0 0 9px;line-height:1.45}
+.cands{display:flex;flex-wrap:wrap;gap:5px}
+.cand{font-family:var(--mono);font-size:10.5px;padding:4px 8px;border-radius:2px;border:1px solid #2E3A47;
+  background:#151D26;color:#8D9AA6;display:inline-flex;align-items:center;gap:6px}
+.cand:hover{border-color:#54626F;color:#DCE4EA}
+.cand.in{border-color:#356052;background:#16241E;color:#CFE3D8}
+.cand.win{border-color:var(--seal-bright);background:#1A3B2E;color:#EAF7EF}
+.cand .d{width:6px;height:6px;border-radius:50%;background:#3B4854;flex:none}
+.cand.in .d{background:var(--seal-bright)}
+.cand.out{text-decoration:line-through;opacity:.72}
+.canonbox{font-family:var(--mono);font-size:10.5px;line-height:1.65;color:#8FA9BC;background:#0C1219;border:1px solid #232E39;
+  border-radius:2px;padding:9px 10px;margin-top:11px;max-height:86px;overflow:auto;word-break:break-all;white-space:pre-wrap}
+.canonbox .k{color:#7C97AC} .canonbox .s{color:#9FC7A9} .canonbox .n{color:#D9B48A}
+.outrow{display:flex;gap:12px;margin-top:11px;flex-wrap:wrap}
+.outrow .o{flex:1;min-width:150px}
+.outrow .ol{font-family:var(--mono);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim)}
+.outrow .ov{font-family:var(--mono);font-size:12px;color:#EAF2ED;word-break:break-all;margin-top:3px;transition:color .2s}
+.outrow .ov.pid{color:var(--seal-bright);font-weight:600;font-size:14px;letter-spacing:.02em}
+.widget .foot{border-top:1px solid #2E3A47;padding:9px 14px;font-size:10.5px;color:var(--dim);line-height:1.45}
 
-.seg > span{display:block}
-.seg .bar{height:5px;border-radius:1px;background:transparent;border:1px dashed #3B4854;transition:background .35s ease,border-color .35s ease}
-.seg.done .bar{background:var(--seal);border:1px solid var(--seal)}
-.seg.warn .bar{background:var(--amber);border:1px solid var(--amber)}
-.seg.bad  .bar{background:var(--fault);border:1px solid var(--fault)}
-.seg.info .bar{background:#5C7F99;border:1px solid #5C7F99}
-.seg .n{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:9px;letter-spacing:.1em}
-.seg .lb{font-weight:600;font-size:12.5px;color:#8D9AA6;margin-top:2px;letter-spacing:-.01em}
-.seg.done .lb,.seg.warn .lb,.seg.bad .lb,.seg.info .lb{color:#F2F5F3}
-/* Wrap at spaces by default so "0 uncovered" cannot split mid-word;
-   only hashes get break-all. */
-.seg .val{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;min-height:14px;word-break:normal;overflow-wrap:break-word}
-.seg .val.hash{word-break:break-all}
-.seg.bad .val{color:#E9A092}
-.seg.bad::after{content:"BREAK";position:absolute;right:16px;top:-1px;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--fault)}
+/* ---------- claim strip ---------- */
+.claim{background:var(--card);border-bottom:1px solid var(--wire);padding:30px 0}
+.claim .wrap{display:flex;gap:30px;align-items:center;flex-wrap:wrap}
+.claim .q{font-size:21px;font-weight:700;letter-spacing:-.02em;max-width:30ch;line-height:1.3}
+.claim .q b{color:var(--seal)}
+.claim .r{font-size:13.5px;color:var(--slate);max-width:52ch;flex:1;min-width:280px;line-height:1.55}
 
-/* ---------- shell ---------- */
-.shell{display:grid;grid-template-columns:262px 1fr;min-height:calc(100vh - 240px)}
-.rail{border-right:1px solid var(--wire);background:var(--card);padding:16px 0 24px}
-.rail-hd{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate2);padding:0 16px 9px}
-.role{display:block;width:100%;text-align:left;background:none;border:0;border-left:3px solid transparent;padding:9px 16px 10px;color:var(--ink)}
-.role:hover{background:var(--paper)}
-.role.on{border-left-color:var(--seal);background:var(--seal-lite)}
-.role .rname{font-weight:600;font-size:13.5px;letter-spacing:-.01em}
-.role .rlim{font-size:11.5px;color:var(--slate);margin-top:2px;line-height:1.35}
-.role.on .rlim{color:#3E5449}
+/* ---------- sections ---------- */
+section{padding:74px 0;border-bottom:1px solid var(--wire)}
+section.tight{padding:56px 0}
+section h2{font-size:31px;font-weight:700;margin:9px 0 0;line-height:1.15}
+.shead{max-width:64ch;margin-bottom:34px}
+section.dark{background:var(--ink);color:#EDF1F3;border-bottom:0}
+section.dark h2{color:#fff}
+section.dark .lede{color:#A9B6C0}
 
-.panel{margin:16px 12px 0;background:var(--ink);border-radius:var(--r);padding:13px}
-.panel h4{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:#8794A0;margin:0 0 3px}
-.panel p{font-size:11px;color:var(--dim);margin:0 0 10px;line-height:1.4}
-.panel label{display:block;font-size:11px;color:#C9D2D8;margin:9px 0 3px}
-.panel select{width:100%;background:var(--ink2);color:#EDF1F3;border:1px solid #2E3A47;border-radius:2px;padding:5px 6px;font-size:11.5px}
-.panel .hint{font-size:10.5px;color:var(--dim);margin-top:5px;line-height:1.4}
-.panel button{width:100%;margin-top:9px;background:var(--ink2);color:#EDF1F3;border:1px solid #2E3A47;border-radius:2px;padding:6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
-.panel button:hover:not(:disabled){border-color:#546374}
-.panel button:disabled{opacity:.45;cursor:not-allowed}
-.simlabel{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:#9A5B12;background:#3A2C13;border-radius:2px;padding:2px 5px;display:inline-block;margin-bottom:7px}
-.reset{width:calc(100% - 24px);margin:14px 12px 0;background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:8px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)}
-.reset:hover{border-color:var(--slate2);color:var(--ink)}
-/* Armed state. Erasing the ledger is irreversible, so it takes two
-   deliberate clicks rather than one stray one. */
-.reset.arm{border-color:#E7C3BA;background:var(--fault-lite);color:var(--fault)}
-.reset.arm:hover{border-color:var(--fault)}
-.resetnote{margin:6px 12px 0;font-size:10.5px;color:var(--slate);line-height:1.4}
+/* problem */
+.problem{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.qcard{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:19px 20px}
+.qcard .qt{font-weight:600;font-size:15.5px;letter-spacing:-.01em}
+.qcard .qd{font-size:13.5px;color:var(--slate);margin-top:6px;line-height:1.55}
+.qcard .who{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--slate2);margin-bottom:8px}
+@media(max-width:820px){.problem{grid-template-columns:1fr}}
 
-/* ---------- stage ---------- */
-.stage{padding:24px 28px 60px;max-width:1040px}
-.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate2)}
-h1{font-weight:700;font-size:25px;letter-spacing:-.025em;margin:5px 0 4px}
-.lede{color:var(--slate);font-size:14px;max-width:64ch;margin:0 0 20px}
-.card{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:17px 18px;margin-bottom:14px}
-.card h3{font-weight:600;font-size:15px;margin:0 0 3px;letter-spacing:-.01em}
-.card .hint{font-size:12px;color:var(--slate);margin:0 0 13px}
-.klabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--slate2);margin-bottom:6px}
-.act{background:var(--ink);color:#fff;border:1px solid var(--ink);border-radius:var(--r);padding:9px 15px;font-weight:600;font-size:13px}
-.act:hover:not(:disabled){background:var(--ink2)}
-.act:disabled{background:var(--wire2);border-color:var(--wire);color:var(--slate2);cursor:not-allowed}
-.act.ghost{background:none;color:var(--ink);border-color:var(--wire)}
-.act.ghost:hover:not(:disabled){border-color:var(--slate)}
-.actrow{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:4px}
-.mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
-pre.blob{font-family:var(--mono);font-size:11px;line-height:1.6;background:var(--ink);color:#C8D3DA;border-radius:var(--r);padding:13px 14px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-all}
-pre.blob .k{color:#89A6BD} pre.blob .s{color:#9FC7A9} pre.blob .n{color:#D9B48A}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th{text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--slate2);font-weight:500;padding:0 10px 7px 0;border-bottom:1px solid var(--wire)}
-td{padding:8px 10px 8px 0;border-bottom:1px solid var(--wire2);vertical-align:top}
-tr.out td{color:var(--slate2)}
-tr.out td.nm{text-decoration:line-through}
-tr.win td{background:var(--seal-lite)}
+/* stages */
+.stages{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#2E3A47;border:1px solid #2E3A47;border-radius:4px;overflow:hidden}
+.stage{background:var(--ink2);padding:19px 19px 21px;position:relative}
+.stage .no{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--dim)}
+.stage .sbar{height:4px;border-radius:1px;background:var(--seal);margin-top:9px;width:100%}
+.stage:nth-child(5) .sbar{background:#5C7F99}
+.stage:nth-child(6) .sbar{background:var(--seal-bright)}
+.stage .sn{font-weight:600;font-size:15.5px;margin-top:11px;color:#F2F5F3;letter-spacing:-.01em}
+.stage .sd{font-size:13px;color:#A0AEB9;margin-top:6px;line-height:1.5}
+.stage .sk{font-family:var(--mono);font-size:10.5px;color:var(--dim);margin-top:9px;word-break:break-all}
+@media(max-width:900px){.stages{grid-template-columns:1fr 1fr}}
+@media(max-width:600px){.stages{grid-template-columns:1fr}}
+.pill{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 7px;border-radius:2px;background:#233041;color:#8FB8CE;margin-top:12px}
+
+/* proves / cannot */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:860px){.two{grid-template-columns:1fr}}
+.col{background:var(--card);border:1px solid var(--wire);border-radius:4px;padding:22px 22px 8px}
+.col.can{border-top:3px solid var(--seal)}
+.col.cannot{border-top:3px solid var(--fault)}
+.col h3{font-size:18px;margin-bottom:3px}
+.col .ch{font-size:13px;color:var(--slate);margin:0 0 8px}
+.line{display:flex;gap:11px;padding:13px 0;border-top:1px solid var(--wire2);align-items:flex-start}
+.line .ic{flex:none;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--mono);font-size:11px;font-weight:700;margin-top:1px;color:#fff}
+.ic.ok{background:var(--seal)} .ic.no{background:var(--fault)}
+.line .lt{font-weight:600;font-size:14px;letter-spacing:-.01em}
+.line .ld{font-size:12.5px;color:var(--slate);margin-top:3px;line-height:1.5}
+
+/* detection */
+.detect{display:grid;grid-template-columns:1.1fr .9fr;gap:34px;align-items:start}
+@media(max-width:860px){.detect{grid-template-columns:1fr}}
+.formula{font-family:var(--mono);font-size:15px;background:var(--ink);color:#C8D3DA;border-radius:var(--r);
+  padding:15px 16px;letter-spacing:.02em;text-align:center}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:16px}
+th{text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--slate2);font-weight:500;padding:0 10px 8px 0;border-bottom:1px solid var(--wire)}
+td{padding:9px 10px 9px 0;border-bottom:1px solid var(--wire2)}
 td.num{font-family:var(--mono)}
-.tag{display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;padding:2px 6px;border-radius:2px;white-space:nowrap}
-.t-ok{background:var(--seal-lite);color:var(--seal)}
-.t-warn{background:var(--amber-lite);color:var(--amber)}
-.t-bad{background:var(--fault-lite);color:var(--fault)}
-.t-idle{background:var(--wire2);color:var(--slate)}
-.t-info{background:var(--info-lite);color:var(--info)}
-.check{display:flex;gap:12px;padding:11px 0;border-top:1px solid var(--wire2);align-items:flex-start}
-.check:first-child{border-top:0}
-.check .ic{flex:none;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-size:11px;font-weight:600;margin-top:1px}
-.ic.ok{background:var(--seal);color:#fff} .ic.bad{background:var(--fault);color:#fff}
-.ic.warn{background:var(--amber);color:#fff} .ic.idle{background:var(--wire2);color:var(--slate2)}
-.check .ct{font-weight:600;font-size:13px}
-.check .cd{font-size:11.5px;color:var(--slate);margin-top:2px;line-height:1.45}
-.verdict{border-radius:var(--r);padding:15px 17px;margin-bottom:14px}
-.verdict.pass{background:var(--seal-lite);border:1px solid #BFD5C6}
-.verdict.fail{background:var(--fault-lite);border:1px solid #E7C3BA}
-.verdict.partial{background:var(--amber-lite);border:1px solid #E5D0B4}
-.verdict.inconclusive{background:var(--info-lite);border:1px solid #BFD0DC}
-.verdict .vt{font-weight:700;font-size:19px;letter-spacing:-.02em}
-.verdict.pass .vt{color:var(--seal)} .verdict.fail .vt{color:var(--fault)}
-.verdict.partial .vt{color:var(--amber)} .verdict.inconclusive .vt{color:var(--info)}
-.verdict .vd{font-size:12.5px;margin-top:4px;color:var(--ink3);max-width:68ch}
-.cov{display:flex;margin:12px 0 6px;border-radius:var(--r);overflow:hidden;height:26px;border:1px solid var(--wire)}
-.cov div{display:grid;place-items:center;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:#fff}
-.cov .c-a{background:var(--seal)} .cov .c-d{background:var(--fault)}
-/* Design.md is explicit: if the dashboard makes `uncovered` easy to
-   overlook, the mechanism has been defeated by its own UI. #B6BEC4
-   read as empty space and its label sat at 1.88:1 — illegible. The
-   hatch says "not filled in" rather than "fine", and both stripe
-   tones clear 4.5:1 against the white label. */
-.cov .c-u{background:repeating-linear-gradient(45deg,#646D77 0 5px,#6E7780 5px 10px)}
-.cov div{padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.uncov-callout{display:flex;gap:8px;align-items:baseline;margin-top:8px;font-size:12.5px;color:var(--ink3)}
-.uncov-callout .dot{flex:none;width:11px;height:11px;border-radius:2px;background:repeating-linear-gradient(45deg,#646D77 0 3px,#6E7780 3px 6px)}
-.note{border-left:2px solid var(--wire);padding:2px 0 2px 12px;font-size:12px;color:var(--slate);margin-top:12px;max-width:66ch;line-height:1.5}
-.note.bad{border-left-color:var(--fault)}
-.empty{color:var(--slate2);font-size:12.5px;font-style:italic;padding:6px 0}
-.blk{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:12px 14px;margin-bottom:9px}
-.blk .bh{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:7px}
-.blk .bn{font-family:var(--mono);font-size:11px;color:var(--slate)}
-.blk .bt{font-weight:600;font-size:13px}
-input[type=text]{width:100%;font-family:var(--mono);font-size:12.5px;padding:9px 11px;border:1px solid var(--wire);border-radius:var(--r);background:var(--paper);color:var(--ink)}
-.hold{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px solid var(--wire2);font-size:12px}
-.hold:first-of-type{border-top:0}
-.hold .hn{font-family:var(--mono);font-size:11px;width:74px;flex:none;color:var(--slate)}
-.byte-ins{background:#DCF0E1;color:#14532d}
-.byte-del{background:#FADDD6;color:#7f1d1d;text-decoration:line-through}
-.bits{font-family:var(--mono);font-size:10.5px;line-height:1.7;word-break:break-all}
-.bits i{font-style:normal;background:var(--fault);color:#fff;border-radius:1px}
-.derive{border-left:2px solid var(--wire2);margin-left:6px;padding-left:16px}
-.derive .step{position:relative;padding:9px 0}
-.derive .step::before{content:"";position:absolute;left:-21px;top:15px;width:9px;height:9px;border-radius:50%;background:var(--card);border:2px solid var(--slate2)}
-.derive .step.on::before{border-color:var(--seal);background:var(--seal)}
-.derive .sh{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--slate2)}
-.derive .sv{font-family:var(--mono);font-size:11px;word-break:break-all;margin-top:3px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.spin{opacity:.5;pointer-events:none}
+td.p{font-family:var(--mono);font-weight:600}
+.bar{display:block;position:relative;background:var(--wire2);height:7px;border-radius:1px;overflow:hidden;min-width:70px}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--seal);display:block}
+.note{border-left:2px solid var(--wire);padding:3px 0 3px 14px;font-size:13px;color:var(--slate);margin-top:18px;line-height:1.55;max-width:60ch}
+.note b{color:var(--ink)}
 
-/* Errors inline, in the page's own language. A native alert() breaks
-   the visual register and reads as a crash. */
-.errbar{display:flex;gap:11px;align-items:flex-start;background:var(--fault-lite);border:1px solid #E7C3BA;
-  border-radius:var(--r);padding:11px 13px;margin-bottom:14px;font-size:12.5px;color:#5F1B0E;max-width:68ch}
-.errbar b{display:block;margin-bottom:1px}
-.errbar .x{margin-left:auto;background:none;border:0;color:var(--fault);font-family:var(--mono);font-size:11px;padding:0 2px}
+/* audience */
+.who3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:860px){.who3{grid-template-columns:1fr}}
+.wcard{background:var(--card);border:1px solid var(--wire);border-radius:4px;padding:22px}
+.wcard .icon{width:34px;height:34px;border-radius:var(--r);background:var(--seal-lite);display:grid;place-items:center;margin-bottom:13px}
+.wcard h3{font-size:16.5px}
+.wcard p{font-size:13.5px;color:var(--slate);margin:7px 0 0;line-height:1.55}
+.wcard ul{margin:12px 0 0;padding-left:17px;font-size:13px;color:var(--slate);line-height:1.7}
 
-/* A verdict computed before the switches changed is not wrong, it is
-   stale — and saying so beats silently discarding it. */
-.stalebar{background:var(--amber-lite);border:1px solid #E5D0B4;border-radius:var(--r);
-  padding:10px 13px;margin-bottom:12px;font-size:12.5px;color:#5C3A0B;max-width:68ch}
-.verdict.stale,.checks.stale{opacity:.45;filter:grayscale(.5)}
+/* integrate */
+.integrate{display:grid;grid-template-columns:.85fr 1.15fr;gap:34px;align-items:start}
+@media(max-width:860px){.integrate{grid-template-columns:1fr}}
+pre.code{font-family:var(--mono);font-size:12px;line-height:1.7;background:#0C1219;color:#C8D3DA;border:1px solid #232E39;
+  border-radius:4px;padding:15px 16px;overflow-x:auto;margin:0}
+pre.code .c{color:#5F7285} pre.code .k{color:#89A6BD} pre.code .s{color:#9FC7A9} pre.code .n{color:#D9B48A}
+.tabs{display:flex;gap:6px;margin-bottom:11px}
+.tab{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;padding:6px 11px;
+  border:1px solid #2E3A47;background:transparent;color:var(--dim);border-radius:2px}
+.tab.on{border-color:var(--seal-bright);background:#16241E;color:#CFE3D8}
+.tab:hover:not(.on){color:#C8D3DA;border-color:#54626F}
+.steps{counter-reset:s;margin:0;padding:0;list-style:none}
+.steps li{counter-increment:s;position:relative;padding:0 0 18px 34px;font-size:14px;color:#B4C0C9;line-height:1.55}
+.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:22px;height:22px;border-radius:50%;
+  background:#233041;color:#9FADB9;font-family:var(--mono);font-size:11px;display:grid;place-items:center}
+.steps li b{color:#F2F5F3;font-weight:600;display:block;margin-bottom:2px;font-size:14.5px}
 
-/* Canonical byte string ↔ field cross-highlighting. */
-.cbytes span{border-radius:2px;padding:1px 0}
-.cbytes span.hl{background:#24503F;box-shadow:0 0 0 1px #6FBF9A}
-tr.frow{cursor:default}
-tr.frow.hl td{background:var(--seal-lite)}
-tr.frow td.fk{font-family:var(--mono);font-size:11px}
-@media(max-width:920px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--wire)}.grid2{grid-template-columns:1fr}}
-@media (prefers-reduced-motion:reduce){.seg .bar{transition:none}}
+/* pricing */
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media(max-width:860px){.tiers{grid-template-columns:1fr}}
+.tier{background:var(--card);border:1px solid var(--wire);border-radius:4px;padding:24px 22px;display:flex;flex-direction:column}
+.tier.feature{border-color:var(--seal);box-shadow:0 1px 0 var(--seal) inset,0 0 0 1px var(--seal)}
+.tier .tn{font-weight:700;font-size:17px;letter-spacing:-.02em}
+.tier .tp{font-family:var(--mono);font-size:13px;color:var(--seal);margin-top:6px;letter-spacing:.02em}
+.tier .td{font-size:13px;color:var(--slate);margin-top:10px;line-height:1.55;min-height:58px}
+.tier ul{margin:14px 0 20px;padding-left:16px;font-size:13px;color:var(--slate);line-height:1.75}
+.tier .btn{margin-top:auto;justify-content:center}
+.badge{display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  background:var(--seal-lite);color:var(--seal);padding:3px 7px;border-radius:2px;margin-left:8px;vertical-align:2px}
+
+/* faq */
+details{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:15px 18px;margin-bottom:9px}
+details[open]{border-color:var(--slate2)}
+summary{font-weight:600;font-size:15px;cursor:pointer;letter-spacing:-.01em;list-style:none;display:flex;gap:12px;align-items:baseline}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";margin-left:auto;font-family:var(--mono);color:var(--slate2);font-size:16px;flex:none}
+details[open] summary::after{content:"–"}
+details p{font-size:13.5px;color:var(--slate);margin:11px 0 0;line-height:1.6;max-width:70ch}
+details p code{font-family:var(--mono);font-size:12.5px;background:var(--wire2);padding:1px 4px;border-radius:2px;color:var(--ink3)}
+
+/* cta band */
+.band{background:var(--seal);color:#EAF7EF;padding:60px 0;border-bottom:0}
+.band h2{color:#fff;font-size:29px}
+.band p{color:#C3DACF;font-size:15.5px;max-width:56ch;margin:12px 0 0}
+.band .cta{display:flex;gap:11px;flex-wrap:wrap;margin-top:26px}
+.band .btn{background:#fff;border-color:#fff;color:var(--seal)}
+.band .btn:hover{background:#DCEBE3;color:var(--seal)}
+.band .btn.ghost{background:none;color:#EAF7EF;border-color:#5C8577}
+.band .btn.ghost:hover{border-color:#EAF7EF;background:none;color:#fff}
+
+/* footer */
+footer{background:var(--card);padding:44px 0 30px}
+.fgrid{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:26px}
+@media(max-width:860px){.fgrid{grid-template-columns:1fr 1fr}}
+.fgrid h4{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate2);margin:0 0 11px;font-weight:500}
+.fgrid a{display:block;color:var(--slate);font-size:13.5px;padding:3px 0}
+.fgrid a:hover{color:var(--ink);text-decoration:none}
+.fgrid a.brand{display:flex;padding:0}
+.fnote{font-size:12.5px;color:var(--slate);max-width:46ch;line-height:1.6;margin:12px 0 0}
+.fbar{margin-top:34px;padding-top:18px;border-top:1px solid var(--wire2);display:flex;gap:16px;flex-wrap:wrap;
+  align-items:center;font-size:12px;color:var(--slate2)}
+.fbar .spacer{flex:1}
+.disclosure{font-family:var(--mono);font-size:11px;color:var(--slate2);line-height:1.6;background:var(--paper);
+  border:1px solid var(--wire);border-left:3px solid var(--amber);border-radius:var(--r);padding:12px 14px;margin-top:26px;max-width:78ch}
+.disclosure b{color:var(--amber)}
+
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style>
 </head>
 <body>
 
-<div class="masthead">
-  <div class="brand">
-    <img class="mark" src="/logo.png" alt="" width="26" height="26" decoding="async" />
-    <div class="wordmark">PROOF<span>CHOICE</span></div>
+<nav class="nav">
+  <div class="inner">
+    <a class="brand" href="/">
+      <img src="/logo.png" alt="" width="27" height="27" decoding="async" />
+      <div class="wordmark">PROOF<span>CHOICE</span></div>
+    </a>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#claim">What it proves</a>
+      <a href="#detection">Detection</a>
+      <a href="#integrate">Integrate</a>
+      <a href="#pricing">Pricing</a>
+    </div>
+    <div class="spacer"></div>
+    <a class="btn sm" href="/demo">Open the live demo <span class="arr">→</span></a>
   </div>
-  <div class="sub">Server console</div>
-  <div class="spacer"></div>
-  <div class="chip" id="chipStore">store …</div>
-  <div class="chip" id="chipKeys">keys …</div>
-  <div class="chip" id="chipMcp">MCP</div>
-</div>
+</nav>
 
-<div id="disclose"></div>
-
-<div class="strip">
-  <div class="strip-hd">Chain of custody — <span id="stripSubject"></span></div>
-  <div class="proofbar" id="proofbar"></div>
-  <div class="custody" id="custody"></div>
-</div>
-
-<div class="shell">
-  <nav class="rail">
-    <div class="rail-hd">Roles · and what each may not do</div>
-    <div id="roles"></div>
-
-    <div class="panel">
-      <h4>Evidence custody</h4>
-      <p>Who holds the preimage. Chosen when the proof is committed.</p>
-      <label for="selModel">Custody model</label>
-      <select id="selModel"></select>
-      <div class="hint" id="modelNote"></div>
+<!-- ============================ hero ============================ -->
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow on-dark">Evidence layer · RFQ &amp; procurement sourcing</div>
+      <h1>When an agent picks a supplier, <em>something has to hold the receipt.</em></h1>
+      <p class="sub">
+        ProofChoice sits beside your recommendation agent and commits — cryptographically — to the
+        candidate set it considered, the ranking rule it applied, which candidates paid commission,
+        and which one won. Then it anchors that commitment where the agent cannot go back and edit it.
+      </p>
+      <div class="cta">
+        <a class="btn on-dark" href="/demo">Open the live demo <span class="arr">→</span></a>
+        <a class="btn ghost on-dark" href="#how">See how it works</a>
+      </div>
+      <p class="under">
+        <b>Never</b> discloses your ranking logic &nbsp;·&nbsp; <b>Never</b> re-orders a result
+        &nbsp;·&nbsp; <b>Never</b> sits in the request path
+      </p>
     </div>
 
-    <div class="panel">
-      <span class="simlabel">Simulated switches</span>
-      <h4>Adversary controls</h4>
-      <p>Holder behaviour, not real outages. Flip one and re-run the audit.</p>
-      <div id="holderCtl"></div>
-      <label for="selClock">Clock offset</label>
-      <select id="selClock">
-        <option value="0">now</option>
-        <option value="25">+25 months — past retention</option>
-      </select>
-      <div class="hint">Shifts the clock only. The manifest is never rewritten: pre-commitment is what makes “expired” checkable.</div>
-      <button id="btnTamper" disabled>Edit platform’s stored copy</button>
+    <!-- Live, not a mockup: real WebCrypto over the real canonical form. -->
+    <div class="widget" id="widget">
+      <div class="wh">
+        <span class="t">Commitment preview</span>
+        <span class="live"><i></i> Live SHA-256</span>
+      </div>
+      <div class="body">
+        <p class="cap">Eight suppliers in the category registry. Click one to drop it from the declared
+          candidate set — exactly what a pruning agent would do — and watch the commitment change.</p>
+        <div class="cands" id="cands"></div>
+        <pre class="canonbox" id="canonOut"></pre>
+        <div class="outrow">
+          <div class="o">
+            <div class="ol">snapshot_hash</div>
+            <div class="ov" id="hashOut">…</div>
+          </div>
+          <div class="o" style="flex:0 0 auto">
+            <div class="ol">proof id</div>
+            <div class="ov pid" id="pidOut">…</div>
+          </div>
+        </div>
+      </div>
+      <div class="foot">
+        Computed in your browser with the same canonical-JSON function the server uses. Nothing is
+        sent anywhere. The proof id is derived from the hash, not assigned — so a supplier can find
+        their own anchor without asking the platform where it is.
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ claim ============================ -->
+<div class="claim">
+  <div class="wrap">
+    <div class="q">ProofChoice makes denial <b>expensive</b>. It does not make lying <b>impossible</b>.</div>
+    <div class="r">
+      That boundary is the product, not a caveat bolted onto it. A Merkle proof shows inclusion and
+      can never show that a set was complete; coverage shows what was asked, never what exists; a
+      signature binds a commitment to a key, not to a truth. Everything below is built to stay inside
+      that line — and to say so out loud when it reaches it.
+    </div>
+  </div>
+</div>
+
+<!-- ============================ problem ============================ -->
+<section>
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">The problem</div>
+      <h2>An agent recommended one supplier out of eight. Who checks?</h2>
+      <p class="lede">
+        Procurement is moving inside models. The buyer sees one answer and a paragraph of reasoning;
+        the seven suppliers who were not recommended see nothing at all. Every party in that
+        transaction has a question, and today nobody can answer any of them after the fact.
+      </p>
+    </div>
+    <div class="problem">
+      <div class="qcard">
+        <div class="who">The buyer asks</div>
+        <div class="qt">“Was this ranked on merit, or on commission?”</div>
+        <div class="qd">The agent's own explanation is generated by the same system under question.
+          A screenshot of it is not evidence — it can be regenerated, edited, or quietly reworded
+          after the fact.</div>
+      </div>
+      <div class="qcard">
+        <div class="who">The supplier asks</div>
+        <div class="qt">“Was I even in the running?”</div>
+        <div class="qd">A supplier that was silently pruned from the candidate set looks identical
+          to one that was considered and lost. There is no artefact that separates the two, so
+          there is nothing to dispute.</div>
+      </div>
+      <div class="qcard">
+        <div class="who">The platform asks</div>
+        <div class="qt">“How do I answer that without opening my ranking model?”</div>
+        <div class="qd">The ranking logic is the business. Any answer that requires publishing it,
+          or handing an auditor a live seat inside the pipeline, will not be given.</div>
+      </div>
+      <div class="qcard">
+        <div class="who">The regulator asks</div>
+        <div class="qt">“Show me the decision as it stood that day.”</div>
+        <div class="qd">Logs are written by the party under audit and mutable by the same party.
+          A record that its author can rewrite is a record of nothing in particular.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ how ============================ -->
+<section class="dark" id="how">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow on-dark">How it works</div>
+      <h2>Six stages. Each one's output is the next one's only input.</h2>
+      <p class="lede">
+        Stage 1 is yours and stays untouched — ProofChoice never sees your ranking logic, never
+        re-orders, never blocks and never delays. It starts the moment you have an answer.
+      </p>
+    </div>
+    <div class="stages">
+      <div class="stage">
+        <div class="no">STAGE 01</div><div class="sbar" style="background:#3B4854"></div>
+        <div class="sn">Recommend</div>
+        <div class="sd">Your agent calls its sources, filters, ranks and picks a winner. The plugin
+          does not participate — it is not in the path.</div>
+        <div class="sk">plugin: inactive</div>
+      </div>
+      <div class="stage">
+        <div class="no">STAGE 02</div><div class="sbar"></div>
+        <div class="sn">Snapshot</div>
+        <div class="sd">Salt and hash each candidate, sort by id, build a Merkle tree, assemble the
+          snapshot and hash it. Salting matters: name plus price is low-entropy and an unsalted leaf
+          is brute-forceable from a shared path.</div>
+        <div class="sk">merkle_root · snapshot_hash</div>
+      </div>
+      <div class="stage">
+        <div class="no">STAGE 03</div><div class="sbar"></div>
+        <div class="sn">Sign</div>
+        <div class="sd">ECDSA P-256 over the snapshot hash, with the key bound to a named operator in
+          an on-chain key registry — otherwise “key compromise” repudiates every past signature.</div>
+        <div class="sk">signature · signer_key_id</div>
+      </div>
+      <div class="stage">
+        <div class="no">STAGE 04</div><div class="sbar"></div>
+        <div class="sn">Anchor</div>
+        <div class="sd">Write-once, reverting on a repeated hash. The commitment now exists somewhere
+          the agent's operator cannot quietly amend it. The preimage stays off-chain with a named
+          custodian and a retention SLA.</div>
+        <div class="sk">anchor(snapshot_hash, sig, key_id)</div>
+      </div>
+      <div class="stage">
+        <div class="no">STAGE 05</div><div class="sbar"></div>
+        <div class="sn">Receipts</div>
+        <div class="sd">Requests go to <b>every supplier in the category registry</b> — not to the list
+          the platform declared — and signed receipts come back through a neutral relayer, never
+          through the party under audit.</div>
+        <div class="pill">the load-bearing stage</div>
+      </div>
+      <div class="stage">
+        <div class="no">STAGE 06</div><div class="sbar"></div>
+        <div class="sn">Audit</div>
+        <div class="sd">Pull, recompute, compare. The verifier is pure — no network, no filesystem,
+          no clock — so a third party runs it with no access to your infrastructure and trusts
+          nothing you assert.</div>
+        <div class="sk">PASS · PARTIAL · FAIL · INCONCLUSIVE</div>
+      </div>
+    </div>
+    <p class="note" style="border-left-color:#3B4854;color:#A0AEB9;margin-top:26px">
+      Two of those decisions carry most of the weight. Draw receipt requests from the platform's own
+      declared set and a pruned supplier is never asked, produces no denial, and the audit is
+      circular. Route receipts through the platform and the accused party is carrying the evidence
+      that indicts it. <b style="color:#EDF1F3">Both failure modes are switchable in the demo</b>, so
+      you can watch detection collapse rather than take our word for it.
+    </p>
+  </div>
+</section>
+
+<!-- ============================ proves / cannot ============================ -->
+<section id="claim">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">The bounded claim</div>
+      <h2>What it proves, and what it will never prove</h2>
+      <p class="lede">
+        Most trust products publish only the left-hand column. The right-hand one is why anybody
+        should believe the left — and both are returned as fields by <code>GET /health</code>, so no
+        interface has to paraphrase them.
+      </p>
+    </div>
+    <div class="two">
+      <div class="col can">
+        <h3>What it proves</h3>
+        <p class="ch">Recomputable by anyone, from the evidence blob, with no access to us.</p>
+        <div class="line">
+          <div class="ic ok">✓</div>
+          <div><div class="lt">The commitment predates the dispute</div>
+            <div class="ld">The anchor is write-once and timestamped before any complaint existed.
+              A story assembled afterwards no longer fits the hash.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic ok">✓</div>
+          <div><div class="lt">The evidence has not been edited since</div>
+            <div class="ld">Every served copy is re-hashed against the anchor. Two bytes changed in a
+              490-byte snapshot flips roughly half the output bits — and the demo shows you exactly that.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic ok">✓</div>
+          <div><div class="lt">A named operator signed it</div>
+            <div class="ld">The signing key resolves from the on-chain registry, not from whatever the
+              platform hands the auditor, with rotation history attached.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic ok">✓</div>
+          <div><div class="lt">The winner was inside the committed set</div>
+            <div class="ld">Merkle inclusion against a tree rebuilt from the evidence — never against
+              a root the platform simply asserts.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic ok">✓</div>
+          <div><div class="lt">Which suppliers were asked, and what they said</div>
+            <div class="ld">Signed receipts from the independent registry, recorded as three distinct
+              states: affirm, deny, uncovered.</div></div>
+        </div>
+      </div>
+
+      <div class="col cannot">
+        <h3>What it cannot</h3>
+        <p class="ch">Stated as plainly as the column beside it, because an overclaim here is a bug.</p>
+        <div class="line">
+          <div class="ic no">×</div>
+          <div><div class="lt">It cannot prove a set was complete</div>
+            <div class="ld">A Merkle proof shows inclusion. No root, ever, shows that nothing was left
+              out. Only registry coverage reaches that question — and only probabilistically.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic no">×</div>
+          <div><div class="lt">It cannot prove the ranking was fair</div>
+            <div class="ld">It commits to the rule you declared, not to the rule you ran. What it
+              removes is the ability to declare a different one afterwards.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic no">×</div>
+          <div><div class="lt">“Nobody objected” is not “nobody was asked”</div>
+            <div class="ld">Uncovered suppliers are counted separately and never folded into
+              agreement. If an interface ever makes that number easy to overlook, the mechanism has
+              been defeated by its own UI.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic no">×</div>
+          <div><div class="lt">A signature binds to a key, not to a truth</div>
+            <div class="ld">The platform is signing its own account of its own decision. What the key
+              registry adds is that it cannot later disown the account.</div></div>
+        </div>
+        <div class="line">
+          <div class="ic no">×</div>
+          <div><div class="lt">Custody makes withholding visible, not impossible</div>
+            <div class="ld">The chain guarantees the anchor persists, never the preimage. A withheld
+              blob returns a custody failure with a name attached — attributable, not prevented.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ detection ============================ -->
+<section id="detection">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">Detection math</div>
+      <h2>The honest numbers on catching a silent prune</h2>
+      <p class="lede">
+        Asking every supplier on every proof does not scale, so coverage is sampled and detection is
+        hypergeometric. A platform prunes <i>k</i> of <i>n</i> registry members; an auditor samples
+        <i>s</i> of them.
+      </p>
+    </div>
+    <div class="detect">
+      <div>
+        <div class="formula">P(detect) = 1 − C(n−k, s) / C(n, s)</div>
+        <table>
+          <thead><tr><th>n</th><th>k pruned</th><th>s sampled</th><th>P(detect)</th><th style="width:34%"></th></tr></thead>
+          <tbody>
+            <tr><td class="num">8</td><td class="num">1</td><td class="num">4</td><td class="p">0.500</td><td><span class="bar"><i style="width:50%"></i></span></td></tr>
+            <tr><td class="num">8</td><td class="num">1</td><td class="num">7</td><td class="p">0.875</td><td><span class="bar"><i style="width:87.5%"></i></span></td></tr>
+            <tr><td class="num">8</td><td class="num">2</td><td class="num">4</td><td class="p">0.786</td><td><span class="bar"><i style="width:78.6%"></i></span></td></tr>
+            <tr><td class="num">200</td><td class="num">5</td><td class="num">40</td><td class="p">0.676</td><td><span class="bar"><i style="width:67.6%"></i></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3 style="font-size:17px">Against a single-supplier prune in a small registry, only
+          near-total coverage gives high per-proof detection.</h3>
+        <p class="lede" style="font-size:14px;margin-top:11px">
+          That is the uncomfortable half, and we would rather you read it here than discover it in
+          a pilot. The recovery is that detection compounds across proofs — over <i>m</i> independent
+          samples it is 1 − (1−p)<sup>m</sup>, so a per-proof 0.5 reaches <b>96.9% by the fifth
+          proof</b>.
+        </p>
+        <p class="note">
+          Which is an argument for auditing a <b>corpus</b>, not for claiming more about any single
+          proof than the numbers support. The live endpoint <code>GET /detection</code> returns these
+          figures for your own n, k and s.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ who ============================ -->
+<section class="tight">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">Who it's for</div>
+      <h2>Three parties, one artefact</h2>
+      <p class="lede">Scope is deliberately RFQ and procurement sourcing, where a bounded supplier
+        registry exists. Consumer search does not have one, and the enhanced layer needs it.</p>
+    </div>
+    <div class="who3">
+      <div class="wcard">
+        <div class="icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#1F4B3F" stroke-width="1.6">
+            <rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M2.5 8h15M7 3.5v13"/>
+          </svg>
+        </div>
+        <h3>Agent platforms</h3>
+        <p>Answer “were you paid for this?” with an artefact instead of an assurance — without
+          publishing the model that makes you money.</p>
+        <ul>
+          <li>Ranking logic never disclosed</li>
+          <li>Zero added latency in the path</li>
+          <li>One call after you have an answer</li>
+        </ul>
+      </div>
+      <div class="wcard">
+        <div class="icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#1F4B3F" stroke-width="1.6">
+            <path d="M10 2.5l6.5 3v5c0 3.6-2.7 6.4-6.5 7-3.8-.6-6.5-3.4-6.5-7v-5z"/><path d="M7.3 10l2 2 3.4-3.6"/>
+          </svg>
+        </div>
+        <h3>Suppliers</h3>
+        <p>Find out whether you were in the candidate set, from a proof id you can derive yourself
+          rather than one the platform has to give you.</p>
+        <ul>
+          <li>Sign receipts offline, from your own key</li>
+          <li>Relayed by a neutral party</li>
+          <li>A denial that lands on the record</li>
+        </ul>
+      </div>
+      <div class="wcard">
+        <div class="icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#1F4B3F" stroke-width="1.6">
+            <circle cx="8.8" cy="8.8" r="5.3"/><path d="M12.8 12.8l4 4"/>
+          </svg>
+        </div>
+        <h3>Auditors &amp; regulators</h3>
+        <p>Re-derive the verdict yourself. The verification algorithm is pure and open source — no
+          network, no filesystem, no clock, no seat inside the platform.</p>
+        <ul>
+          <li>Four verdicts, including INCONCLUSIVE</li>
+          <li>Each check reports independently</li>
+          <li>Nothing masks the checks after it</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ integrate ============================ -->
+<section class="dark" id="integrate">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow on-dark">Integrate</div>
+      <h2>One call after your agent has an answer</h2>
+      <p class="lede">Speak MCP and your model can drive it directly — ChatGPT becomes the agent
+        under audit, including when you ask it to prune a supplier on purpose. Or speak plain REST.
+        Node 20+, no bundler, no framework, two optional dependencies.</p>
+    </div>
+    <div class="integrate">
+      <ol class="steps">
+        <li><b>Point your agent at the endpoint</b>Add the MCP server, or POST to <code>/attest</code>
+          from wherever your ranking finishes.</li>
+        <li><b>Commit what you declared</b>You get back a proof id, a snapshot hash, a signature and
+          an anchor block — synchronously, after the recommendation has already gone out.</li>
+        <li><b>Let the registry ask</b>Receipts are requested across the whole category registry and
+          relayed back signed. You are not in that loop, by design.</li>
+        <li><b>Anyone verifies</b><code>GET /verify/PC-…</code>, or run the pure verifier yourself
+          against the evidence blob.</li>
+      </ol>
+      <div>
+        <div class="tabs" role="tablist">
+          <button class="tab on" data-pane="mcp" role="tab" aria-selected="true">MCP</button>
+          <button class="tab" data-pane="rest" role="tab" aria-selected="false">REST</button>
+          <button class="tab" data-pane="verify" role="tab" aria-selected="false">Verify</button>
+        </div>
+<pre class="code" id="pane-mcp"><span class="c">// Your model calls the tool. It commits to whatever</span>
+<span class="c">// candidate set the model declares — which is the</span>
+<span class="c">// point, and the thing the receipts then test.</span>
+{
+  <span class="k">"name"</span>: <span class="s">"pc_attest"</span>,
+  <span class="k">"arguments"</span>: {
+    <span class="k">"query"</span>:          <span class="s">"3 nights, Hong Kong, under HK$1,600"</span>,
+    <span class="k">"candidate_ids"</span>:  [<span class="s">"SUP-01"</span>, <span class="s">"SUP-03"</span>, <span class="s">"SUP-04"</span>, <span class="s">"SUP-05"</span>],
+    <span class="k">"winner_id"</span>:     <span class="s">"SUP-01"</span>,
+    <span class="k">"ranking_rule_id"</span>: <span class="s">"rr.value-weighted.v2"</span>
+  }
+}
+
+<span class="c">→ proof_id       PC-9F3C1A88D2</span>
+<span class="c">→ snapshot_hash  9f3c1a88d2…</span>
+<span class="c">→ anchor         block #147, write-once</span></pre>
+
+<pre class="code" id="pane-rest" hidden><span class="c"># Commit — after the recommendation has shipped.</span>
+curl -X POST https://your-deploy/attest \
+  -H <span class="s">'content-type: application/json'</span> \
+  -d <span class="s">'{
+    "query": "3 nights, Hong Kong, under HK$1,600",
+    "candidate_ids": ["SUP-01","SUP-03","SUP-04","SUP-05"],
+    "winner_id": "SUP-01",
+    "ranking_rule_id": "rr.value-weighted.v2",
+    "custody_model": "hybrid",
+    "retention_months": <span class="n">24</span>
+  }'</span>
+
+<span class="c"># Ask the registry — every member, not your list.</span>
+curl -X POST https://your-deploy/receipts \
+  -d <span class="s">'{"proof_id":"PC-9F3C1A88D2","routing":"relayer"}'</span></pre>
+
+<pre class="code" id="pane-verify" hidden><span class="c"># Anyone, with no access to the platform. Abridged —</span>
+<span class="c"># every check carries its own detail string.</span>
+curl https://your-deploy/verify/PC-29A10F978D
+
+{
+  <span class="k">"checks"</span>: [
+    { <span class="k">"title"</span>: <span class="s">"Anchor found for this proof ID"</span>,
+      <span class="k">"state"</span>: <span class="s">"ok"</span> },
+    { <span class="k">"title"</span>: <span class="s">"Evidence preimage available"</span>,
+      <span class="k">"state"</span>: <span class="s">"ok"</span>, <span class="k">"custody_state"</span>: <span class="s">"AVAILABLE"</span> },
+    { <span class="k">"title"</span>: <span class="s">"Recomputed hash matches the anchor"</span>,
+      <span class="k">"state"</span>: <span class="s">"ok"</span> },
+    { <span class="k">"title"</span>: <span class="s">"Platform signature valid, key bound to a named operator"</span>,
+      <span class="k">"state"</span>: <span class="s">"ok"</span> },
+    { <span class="k">"title"</span>: <span class="s">"Winner proven inside the committed candidate set"</span>,
+      <span class="k">"state"</span>: <span class="s">"ok"</span>, <span class="k">"path_length"</span>: <span class="n">2</span> },
+    <span class="c">// Four registry members signed a denial: never asked,</span>
+    <span class="c">// while the platform declared its pool complete.</span>
+    { <span class="k">"title"</span>: <span class="s">"Registry coverage — was any supplier never asked?"</span>,
+      <span class="k">"state"</span>: <span class="s">"bad"</span>,
+      <span class="k">"coverage"</span>: { <span class="k">"total"</span>: <span class="n">8</span>, <span class="k">"asked"</span>: <span class="n">8</span>,
+                     <span class="k">"affirm"</span>: <span class="n">4</span>, <span class="k">"deny"</span>: <span class="n">4</span>, <span class="k">"uncovered"</span>: <span class="n">0</span> } }
+  ],
+  <span class="k">"verdict"</span>: <span class="s">"fail"</span>,
+  <span class="k">"custody_state"</span>: <span class="s">"AVAILABLE"</span>,
+  <span class="k">"summary"</span>: <span class="s">"Baseline attestation is internally valid. The</span>
+    <span class="s">registry receipts contradict it: a supplier that was</span>
+    <span class="s">never asked proves the declared pool was not the real one."</span>
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ pricing ============================ -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">Pricing</div>
+      <h2>The verifier is open source, permanently</h2>
+      <p class="lede">
+        A trust layer nobody can inspect is a trust layer nobody should use. The cryptography, the
+        verification algorithm and the console are Apache-2.0 and always will be — we charge for
+        running the registry, the custody and the anchor layer as an independent operator.
+      </p>
+    </div>
+    <div class="tiers">
+      <div class="tier">
+        <div class="tn">Self-hosted</div>
+        <div class="tp">Free · Apache-2.0</div>
+        <div class="td">The whole implementation, running in your own infrastructure. Nothing is
+          held back, and no feature is gated behind a licence key.</div>
+        <ul>
+          <li>Anchor, custody and verifier</li>
+          <li>MCP endpoint and REST API</li>
+          <li>Full console and audit views</li>
+          <li>Community support</li>
+        </ul>
+        <a class="btn ghost" href="https://github.com/sanpingz/proofchoice">Read the source</a>
+      </div>
+      <div class="tier feature">
+        <div class="tn">Design partner <span class="badge">Preview</span></div>
+        <div class="tp">Talk to us</div>
+        <div class="td">We run the registry, custody and anchor layer so the operator is not the
+          party under audit — which is the weakness a self-hosted deployment cannot fix.</div>
+        <ul>
+          <li>Independently operated anchor log</li>
+          <li>Managed category registry and relayer</li>
+          <li>Named custodians with retention SLAs</li>
+          <li>Integration support, direct line to the team</li>
+        </ul>
+        <a class="btn" href="mailto:hello@proofchoice.io?subject=Design%20partner">Start a conversation</a>
+      </div>
+      <div class="tier">
+        <div class="tn">Enterprise</div>
+        <div class="tp">Talk to us</div>
+        <div class="td">For marketplaces and regulated procurement, where the audit trail has to
+          survive contact with someone else's lawyers.</div>
+        <ul>
+          <li>Corpus-level audit reporting</li>
+          <li>Custody model and retention to policy</li>
+          <li>Key rotation and operator binding</li>
+          <li>Deployment review and onboarding</li>
+        </ul>
+        <a class="btn ghost" href="mailto:hello@proofchoice.io?subject=Enterprise">Contact sales</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ faq ============================ -->
+<section class="tight">
+  <div class="wrap">
+    <div class="shead">
+      <div class="eyebrow">Questions</div>
+      <h2>The ones worth asking first</h2>
+    </div>
+    <details open>
+      <summary>Does this see or slow down my ranking model?</summary>
+      <p>No, on both counts. Stage 1 belongs entirely to your agent; ProofChoice starts once you
+        already have a winner. It never re-ranks, blocks, delays or reorders, and the ranking rule is
+        committed as an <b>identifier</b> — <code>rr.value-weighted.v2</code> — not as its
+        implementation.</p>
+    </details>
+    <details>
+      <summary>What stops me committing to a candidate set I made up?</summary>
+      <p>Nothing at the commit stage — and that is stated deliberately rather than papered over.
+        <code>pc_attest</code> commits to whatever set you declare, and stages 2 to 4 will attest
+        perfectly to a pruned pool. Only stage 5 reaches it: receipts are requested from every member
+        of the independent category registry, so a supplier you left out is still asked, and signs a
+        denial that lands on the record. That asymmetry is the mechanism, not a gap in it.</p>
+    </details>
+    <details>
+      <summary>Is this a blockchain?</summary>
+      <p>No, and we will not let it be described as one. The reference implementation's ledger is a
+        single-operator append-only log: it does not resist its own operator deleting it. The
+        cryptography is real and independently recomputable; the decentralisation is not there yet.
+        Saying so is the only version of this product worth selling.</p>
+    </details>
+    <details>
+      <summary>What happens if the evidence blob disappears?</summary>
+      <p>The anchor still verifies and the audit returns a <b>custody</b> failure with a named
+        holder attached — never a chain failure, and never a silent pass. Custody has five states,
+        including expired retention, which returns <code>INCONCLUSIVE</code> rather than being
+        dressed up as a partial pass. Withholding becomes visible and attributable. It does not
+        become impossible.</p>
+    </details>
+    <details>
+      <summary>Can I verify a proof without trusting you?</summary>
+      <p>That is the requirement the whole design is built around. The verification algorithm is
+        pure — no network, no filesystem, no clock — so you can run it against an evidence blob with
+        no access to our infrastructure. The console goes further and recomputes every hash in your
+        browser rather than displaying the server's verdict, so if the two ever disagreed, the
+        disagreement itself would be the finding.</p>
+    </details>
+    <details>
+      <summary>Why procurement rather than consumer search?</summary>
+      <p>Because the enhanced layer needs a bounded supplier registry to draw receipt requests from,
+        and consumer search does not have one. Without that registry the audit is circular: you only
+        ever ask the suppliers the platform already admitted to considering. Scoping to RFQ and
+        procurement sourcing is honest about where the mechanism actually works.</p>
+    </details>
+  </div>
+</section>
+
+<!-- ============================ band ============================ -->
+<section class="band">
+  <div class="wrap">
+    <h2>Watch it fail on purpose.</h2>
+    <p>The demo ships with the adversary switches wired up: prune a supplier, withhold the evidence,
+      push the clock past retention, edit the platform's stored copy byte by byte. Then re-run the
+      audit and see which check catches it — and which one does not.</p>
+    <div class="cta">
+      <a class="btn" href="/demo">Open the live demo <span class="arr">→</span></a>
+      <a class="btn ghost" href="https://github.com/sanpingz/proofchoice">View on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ footer ============================ -->
+<footer>
+  <div class="wrap">
+    <div class="fgrid">
+      <div>
+        <a class="brand" href="/">
+          <img src="/logo.png" alt="" width="27" height="27" decoding="async" />
+          <div class="wordmark">PROOF<span>CHOICE</span></div>
+        </a>
+        <p class="fnote">An evidence layer for AI agent recommendations. Commit the candidate set,
+          sign it, anchor it — then ask every supplier in the registry whether they were really asked.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <a href="#how">How it works</a>
+        <a href="#claim">What it proves</a>
+        <a href="#detection">Detection math</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+      <div>
+        <h4>Developers</h4>
+        <a href="/demo">Live demo</a>
+        <a href="/health">Health &amp; disclosures</a>
+        <a href="/registry">Category registry</a>
+        <a href="/chain">Anchor registry</a>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <a href="https://github.com/sanpingz/proofchoice">GitHub</a>
+        <a href="mailto:hello@proofchoice.io">hello@proofchoice.io</a>
+        <a href="https://github.com/sanpingz/proofchoice/blob/main/LICENSE">Licence</a>
+      </div>
     </div>
 
-    <div id="resetBox"></div>
-  </nav>
+    <div class="disclosure">
+      <b>STANDING DISCLOSURE.</b> Cryptography is real: SHA-256, ECDSA P-256, salted Merkle trees,
+      all independently recomputable. The reference ledger is a single-operator append-only log, not
+      a blockchain — it does not resist the operator deleting it. In this deployment the chain, the
+      custodians, the relayer and the platform run in one process, so their separation is a module
+      boundary rather than an adversarial one. <code>GET /health</code> returns this verbatim.
+    </div>
 
-  <main class="stage" id="stage"></main>
-</div>
+    <div class="fbar">
+      <div>© 2026 ProofChoice · Apache-2.0</div>
+      <div class="spacer"></div>
+      <div>Makes denial expensive. Not lying impossible.</div>
+    </div>
+  </div>
+</footer>
 
 <script>
 /* ============================================================
-   Canonical JSON — PINNED, identical to server/core.js.
-   The console recomputes hashes itself so the verdict shown is
-   not merely the server's word for it. Any change here silently
-   disagrees with every hash the server has ever produced.
+   Canonical JSON — PINNED, identical to server/core.js and to
+   the console in demo.html. The hero widget hashes the real
+   canonical form; a landing page that faked this would be
+   arguing against its own product.
    ============================================================ */
 function canon(o){
   if(o===null||typeof o!=='object') return JSON.stringify(o);
   if(Array.isArray(o)) return '['+o.map(canon).join(',')+']';
   return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+canon(o[k])).join(',')+'}';
 }
-const enc = new TextEncoder();
-const hex = b => [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
-const sha256 = async s => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
 
-const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const short = (h,n=16) => h ? h.slice(0,n) : '';
-function pretty(o){
-  return esc(JSON.stringify(o,null,2))
-    .replace(/&quot;([^&]+)&quot;:/g,'<span class="k">"$1"</span>:')
-    .replace(/: &quot;([^&]*)&quot;/g,': <span class="s">"$1"</span>')
-    .replace(/: (\d+|true|false|null)/g,': <span class="n">$1</span>');
-}
+/* ---------- hero: live commitment ---------- */
+(function(){
+  const candsEl = document.getElementById('cands');
+  if(!candsEl) return;
 
-/* ============================================================
-   Canonical byte spans
-   ------------------------------------------------------------
-   Rebuilds the canonical string the same way canon() does, while
-   recording where each top-level field's bytes start and end. That
-   turns "this is what gets hashed" from a wall of monospace into
-   something you can point at: hover a field, see its bytes.
-
-   The reconstruction is asserted against canon() at render time — if
-   the two ever disagreed, the highlighting would be a lie about the
-   very thing this view exists to show.
-   ============================================================ */
-function canonSegments(o){
-  const keys = Object.keys(o).sort();
-  const segs = [];
-  let s = '{', off = 1;
-  keys.forEach((k, i) => {
-    const text = JSON.stringify(k) + ':' + canon(o[k]);
-    segs.push({ key:k, text, start:off, end:off + text.length, bytes:text.length });
-    s += text; off += text.length;
-    if (i < keys.length - 1) { s += ','; off += 1; }
-  });
-  return { canonical: s + '}', segs };
-}
-
-/** Wrap each field's bytes in a span, escaping everything else. */
-function canonHtml(canonical, segs){
-  let out = '', pos = 0;
-  for(const sg of segs){
-    out += esc(canonical.slice(pos, sg.start));
-    out += `<span data-f="${esc(sg.key)}">${esc(sg.text)}</span>`;
-    pos = sg.end;
-  }
-  return out + esc(canonical.slice(pos));
-}
-
-/* ---------- api ---------- */
-const api = {
-  async get(p){ const r = await fetch(p); const j = await r.json().catch(()=>({})); return {ok:r.ok, status:r.status, body:j}; },
-  async post(p,b){ const r = await fetch(p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b||{})});
-                   const j = await r.json().catch(()=>({})); return {ok:r.ok, status:r.status, body:j}; },
-};
-
-/* ---------- state ---------- */
-const QUERY = 'Annual room-block framework · Hong Kong · 4-star+ · 120 room-nights/month';
-
-/* ------------------------------------------------------------
-   Many proofs, not one.
-
-   Every query produces its own chain of custody, so the console
-   holds a LIST of proof records and shows the latest by default.
-   The server always worked this way — the ledger is append-only and
-   every endpoint is per-proof — it was only the UI that forgot.
-
-   Two distinct things share the screen:
-     · a DRAFT — the query being composed and the candidate set the
-       agent is about to declare. It has no proof yet, so the strip
-       reads as awaiting.
-     · a PROOF record — committed, anchored, and immutable.
-
-   Starting a new query resets the strip, which is exactly what "each
-   query gets its own chain of custody" means.
-   ------------------------------------------------------------ */
-let S = {
-  role:'requester', health:null, registry:[],
-  proofs:[],            // oldest first; each one its own chain of custody
-  selected:null,        // proof_id currently shown
-  composing:true,       // a draft query is being prepared
-  draft:{ query:QUERY, declared:new Set() },
-  model:'hybrid', routing:'relayer',
-  error:null,           // inline, never alert()
-};
-
-/** The proof on screen, or null while composing a new query. */
-const cur = () => (S.composing ? null : S.proofs.find(p => p.proof_id === S.selected) ?? null);
-/** The record for a proof id regardless of what is on screen. */
-const rec = id => S.proofs.find(p => p.proof_id === id) ?? null;
-
-function addProof(r){
-  const i = S.proofs.findIndex(p => p.proof_id === r.proof_id);
-  if(i >= 0) S.proofs[i] = { ...S.proofs[i], ...r }; else S.proofs.push(r);
-  S.selected = r.proof_id;
-  S.composing = false;
-}
-
-const setError = (title, detail) => { S.error = {title, detail}; };
-const clearError = () => { S.error = null; };
-
-/** A verdict computed before the adversary switches changed is not
- *  wrong, it is stale. Saying so is better than silently discarding
- *  it — and far better than leaving it on screen as if it still held.
- *  The switches are server-wide, so every held verdict goes stale. */
-function markStale(){ for(const p of S.proofs) if(p.audit) p.auditStale = true; }
-
-function errorBlock(){
-  if(!S.error) return '';
-  return `<div class="errbar" role="alert">
-    <div><b>${esc(S.error.title)}</b>${S.error.detail?esc(S.error.detail):''}</div>
-    <button class="x" id="errX" aria-label="Dismiss">dismiss</button></div>`;
-}
-
-const ROLES = [
-  {id:'requester', name:'Requester',        lim:'Initiates the query. Receives one answer and one proof ID.'},
-  {id:'agent',    name:'AI agent platform', lim:'Cannot alter an anchor once written, or suppress a relayed receipt.'},
-  {id:'schema',   name:'Schema inspector',  lim:'Shows exactly which bytes are hashed — not the pretty JSON.'},
-  {id:'supplier', name:'Suppliers',         lim:'Cannot see the ranking, or sign on another supplier’s behalf.'},
-  {id:'auditor',  name:'Auditor',           lim:'Cannot change the record. Only recompute and compare.'},
-  {id:'chain',    name:'Anchor registry',   lim:'Append-only. No overwrite, no delete, no ranking logic.'},
-];
-
-/* ============================================================
-   Custody strip — seven stages.
-   Custody is a genuine stage here, not decoration: the server
-   writes a registerCustody() record naming who acknowledged
-   holding the preimage and until when.
-   ============================================================ */
-/* The strip is progressive: it fills in as a run advances, and a new
-   query restarts it from stage 01 rather than blanking. Stage 01 is
-   genuinely knowable before anything is committed — the query exists,
-   and its hash is computed here in the browser, so what the strip
-   shows before the commit is the same value the server will commit. */
-function draftStripModel(){
-  const q = S.draft.query.trim();
-  const n = S.draft.declared.size;
-  return [
-    {n:'01', lb:'Query',     st:q?'done':'', go:'requester', hash:!!S.draftQueryHash,
-             v:!q ? 'awaiting request' : (S.draftQueryHash ? short(S.draftQueryHash)+'…' : 'hashing…')},
-    {n:'02', lb:'Snapshot',  st:'', go:'agent',
-             v:n ? `${n} candidate${n===1?'':'s'} declared` : 'no candidates declared'},
-    {n:'03', lb:'Signature', st:'', go:'agent',    v:'unsigned'},
-    {n:'04', lb:'Anchor',    st:'', go:'chain',    v:'not anchored'},
-    {n:'05', lb:'Custody',   st:'', go:'auditor',  v:`${modelName(S.model)} · on commit`},
-    {n:'06', lb:'Receipts',  st:'', go:'supplier', v:'not requested'},
-    {n:'07', lb:'Verdict',   st:'', go:'auditor',  v:'not audited'},
+  /* The same eight suppliers as the category registry in
+     server/registry.js, so the demo next door is recognisably the
+     same universe. */
+  const REGISTRY = [
+    { id:'SUP-01', name:'Kowloon Bay Lodge',   price:1180 },
+    { id:'SUP-02', name:'Harbourview Central', price:1540 },
+    { id:'SUP-03', name:'Lantern Court',       price:1320 },
+    { id:'SUP-04', name:'Sheung Wan Boutique', price:1240 },
+    { id:'SUP-05', name:'Peak & Stone',        price:1410 },
+    { id:'SUP-06', name:'Nathan Grand',        price:1690 },
+    { id:'SUP-07', name:'Star Ferry Suites',   price:1870 },
+    { id:'SUP-08', name:'Aurora Causeway',     price:1790 },
   ];
-}
+  const WINNER = 'SUP-01';
+  const declared = new Set(REGISTRY.map(s => s.id));
 
-function stripModel(){
-  const c = cur();
-  if(!c) return draftStripModel();
-  const p = c, a = c?.audit ?? null;
-  const cov = c?.coverage ?? null;
-  const cs = a?.custody_state;
-  const custodySt = !p ? '' : cs === 'AVAILABLE' || !cs ? 'done'
-                    : cs === 'EXPIRED' ? 'info' : 'bad';
-  const hashSt = !p ? '' : !a ? 'done'
-                 : a.checks?.[2]?.state === 'bad' ? 'bad'
-                 : a.checks?.[2]?.state === 'warn' ? 'warn' : 'done';
-  /* Everything below must survive a proof whose preimage is gone.
-     Evidence can legitimately be withheld, lost or expired, and a
-     re-opened proof then has an anchor but no snapshot — which used
-     to throw here and blank the entire page. The anchor alone still
-     carries the hash, the signature and the block. */
-  const snap = p.snapshot ?? null;
-  const anc = p.anchor ?? null;
-  return [
-    {n:'01', lb:'Query',     st:p?'done':'',  go:'requester', hash:!!snap,
-             v:snap ? short(snap.query_hash)+'…' : 'preimage unavailable'},
-    {n:'02', lb:'Snapshot',  st:hashSt,       go:'agent',    hash:!!p.snapshot_hash,
-             v:p.snapshot_hash ? short(p.snapshot_hash)+'…' : 'not built'},
-    {n:'03', lb:'Signature', st:!p?'':(a&&a.checks?.[3]?.state==='warn'?'warn':'done'), go:'agent', hash:!!anc?.platform_signature,
-             v:anc?.platform_signature ? short(anc.platform_signature)+'…' : 'unsigned'},
-    {n:'04', lb:'Anchor',    st:p?'done':'',  go:'chain',
-             v:anc ? `block ${anc.block}` : 'not anchored'},
-    {n:'05', lb:'Custody',   st:custodySt,    go:'auditor',
-             v:cs ? cs.toLowerCase()
-                  : p.custody ? `${modelName(p.custody.model)} · ${(p.custody.holders??[]).length} holders`
-                  : 'manifest not loaded'},
-    {n:'06', lb:'Receipts',  st:!cov?'':(cov.deny?'bad':cov.uncovered?'warn':'done'), go:'supplier',
-             v:cov?`${cov.affirm} affirm · ${cov.deny} deny · ${cov.uncovered} uncovered`:'not requested'},
-    {n:'07', lb:'Verdict',   st:!a?'':a.verdict==='pass'?'done':a.verdict==='partial'?'warn':a.verdict==='inconclusive'?'info':'bad',
-             go:'auditor',
-             v:a?a.verdict.toUpperCase():'not audited'},
-  ];
-}
-const VERDICT_CLASS = {pass:'done', partial:'warn', inconclusive:'info', fail:'bad'};
+  const canonOut = document.getElementById('canonOut');
+  const hashOut  = document.getElementById('hashOut');
+  const pidOut   = document.getElementById('pidOut');
 
-/** One chip per proof, newest first, plus the draft while composing.
- *  A single proof proves very little; seeing them accumulate is the
- *  first step toward reading them as a corpus. */
-function renderProofBar(){
-  const el = document.getElementById('proofbar');
-  if(!el) return;
-  const chips = S.proofs.slice().reverse().map(p=>{
-    const st = p.audit ? VERDICT_CLASS[p.audit.verdict] : '';
-    const on = !S.composing && p.proof_id === S.selected;
-    return `<button type="button" class="pchip ${st} ${on?'on':''}" data-proof="${esc(p.proof_id)}"
-      title="${esc(p.query ?? '')}">
-      <span class="pdot"></span>${esc(p.proof_id)}</button>`;
-  }).join('');
-  /* No "new query" affordance here: the bar is purely a switcher.
-     Starting a run belongs to the roles that do it — "Ask the agent"
-     in the requester view, "Start a new query" in the agent view. */
-  const draft = S.composing ? `<span class="pchip on draft"><span class="pdot"></span>new query</span>` : '';
-  el.innerHTML =
-    `<span class="plabel">${S.proofs.length} proof${S.proofs.length===1?'':'s'}</span>` +
-    draft + chips;
-}
+  /* Syntax colouring for the canonical string. Operates on the string
+     canon() produced, never on a re-serialisation of it. */
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const paint = s => esc(s)
+    .replace(/"([^"]+)":/g, '<span class="k">"$1"</span>:')
+    .replace(/:"([^"]*)"/g, ':<span class="s">"$1"</span>')
+    .replace(/:(-?\d+(?:\.\d+)?)/g, ':<span class="n">$1</span>');
 
-/** The query hash of the draft, recomputed in-browser as it is typed,
- *  so stage 01 shows the real value rather than a placeholder. */
-async function updateDraftHash(){
-  const q = S.draft.query.trim();
-  S.draftQueryHash = q ? await sha256(S.draft.query) : null;
-}
-
-function renderStrip(){
-  renderProofBar();
-  const subj = document.getElementById('stripSubject');
-  if(subj) subj.textContent = S.composing ? 'new query, not yet committed' : (cur()?.proof_id ?? '');
-  document.getElementById('custody').innerHTML = stripModel().map(s=>`
-    <button type="button" class="seg ${s.st}" data-goto="${s.go}"
-            aria-label="Stage ${s.n}, ${s.lb}: ${esc(s.v)}">
-      <span class="bar"></span><span class="n">${s.n}</span>
-      <span class="lb">${s.lb}</span>
-      <span class="val ${s.hash?'hash':''}">${esc(s.v)}</span>
-    </button>`).join('');
-}
-
-/* ============================================================
-   Views
-   ============================================================ */
-const V = {};
-
-V.requester = () => {
-  const p = cur();
-  const w = p?.snapshot ? S.registry.find(r=>r.id===p.snapshot.winner_id) : null;
-  const a = p?.audit ?? null;
-  return `
-  <div class="eyebrow">Role 01 · Requester</div>
-  <h1>Ask the agent</h1>
-  <p class="lede">You see one answer and one proof ID. You never see the candidate pool — that is the whole problem, and the reason the proof ID has to be worth something.</p>
-
-  <div class="card">
-    <div class="klabel">Procurement request</div>
-    <input type="text" id="qInput" value="${esc(S.draft.query)}" aria-label="Procurement request" />
-    <div class="actrow" style="margin-top:12px">
-      <button class="act" id="goAsk">Ask the agent</button>
-      <span class="hint" style="margin:0">Each request gets its own chain of custody. Edit the text to commit a different one.</span>
-    </div>
-    ${S.proofs.length?`<div class="note">${S.proofs.length} proof${S.proofs.length===1?'':'s'} committed so far. A single proof proves very little; a run of them is where patterns become visible.</div>`:''}
-  </div>
-
-  ${p&&!w&&p.snapshot?`<div class="card"><div class="klabel">Recommendation</div>
-    <div class="empty">Winner ${esc(p.snapshot.winner_id)} is not in the current registry.</div></div>`:''}
-
-  ${w?`<div class="card">
-    <div class="klabel">Recommendation · ${esc(p.proof_id)}</div>
-    <h3>${esc(w.name)}</h3>
-    <p class="hint">¥${w.price.toLocaleString()} per room-night · quality score ${w.score} · ${w.comm>0?`supplier pays a ${w.comm}% commission`:'no commission paid to the platform'}</p>
-    ${p.query?`<div class="klabel" style="margin-top:14px">Request</div><div class="mono" style="font-size:12px;color:var(--slate)">${esc(p.query)}</div>`:''}
-    <div class="klabel" style="margin-top:14px">Proof ID</div>
-    <div class="mono" style="font-size:15px;font-weight:600">${esc(p.proof_id)}</div>
-    <div class="note">Derived from the snapshot hash, so you can locate your own anchor without asking the platform where it is. Hand this to any auditor.</div>
-  </div>`:''}
-
-  ${a?verdictBlock(a, true):''}`;
-};
-
-V.agent = () => {
-  const p = cur();
-  /* While composing, the table is the editable draft. Once committed,
-     it shows what that proof actually declared — read-only, because an
-     anchored candidate set is not editable by definition. */
-  const committed = p ? new Set((p.evidence?.served?.[0]?.blob?.candidates ?? []).map(c=>c.id)) : null;
-  const declaredSet = S.composing ? S.draft.declared : committed;
-  const knowSet = S.composing || (committed && committed.size);
-
-  const rows = S.registry.map(c=>{
-    const inSet = knowSet ? declaredSet.has(c.id) : false;
-    const isWin = p?.snapshot?.winner_id === c.id;
-    return `<tr class="${knowSet&&!inSet?'out':''} ${isWin?'win':''}">
-      <td>${S.composing
-        ? `<input type="checkbox" data-cand="${c.id}" ${inSet?'checked':''} aria-label="Declare ${esc(c.name)}" />`
-        : ''}</td>
-      <td class="num">${c.id}</td><td class="nm">${esc(c.name)}</td>
-      <td class="num">¥${c.price.toLocaleString()}</td><td class="num">${c.score}</td><td class="num">${c.comm}%</td>
-      <td>${!knowSet?'<span class="tag t-idle">—</span>'
-            :!inSet?'<span class="tag t-bad">not declared</span>'
-            :isWin?'<span class="tag t-ok">winner</span>':'<span class="tag t-idle">candidate</span>'}</td>
-    </tr>`;
-  }).join('');
-  const omitted = S.composing ? S.registry.filter(c=>!S.draft.declared.has(c.id)) : [];
-  const winner = pickWinner();
-
-  return `
-  <div class="eyebrow">Role 02 · AI agent platform · ProofChoice plugin</div>
-  <h1>${S.composing?'Declare and commit':'Committed set · '+esc(p?.proof_id ?? '')}</h1>
-  <p class="lede">The plugin observes. It never re-ranks, blocks or delays the recommendation — it commits to what the agent already decided, and signs that commitment.</p>
-
-  <div class="card">
-    <div class="klabel">Stage 1 · the candidate pool the agent declares</div>
-    <p class="hint">${S.composing
-      ? 'Untick a supplier to prune it. The plugin will attest perfectly to whatever remains — that is exactly what the baseline layer cannot see.'
-      : knowSet ? 'Anchored, so no longer editable. Start a new query to declare a different set.'
-                : 'The evidence for this proof is not currently retrievable, so the declared set cannot be shown.'}</p>
-    <table><thead><tr><th></th><th>ID</th><th>Supplier</th><th>Unit price</th><th>Score</th><th>Commission</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-    ${omitted.length?`<div class="note bad"><b>${omitted.length} supplier${omitted.length===1?'':'s'} withheld from the declared set.</b> Stages 2–4 will still produce a perfectly valid proof. Only the registry receipts in stage 5 can reach this.</div>`:''}
-    <div class="actrow" style="margin-top:14px">
-      ${S.composing
-        ? `<button class="act" id="goAttest" ${!S.draft.declared.size?'disabled':''}>Commit &amp; anchor${winner?` — winner ${winner.id}`:''}</button>
-           <span class="hint" style="margin:0">Winner is the highest-scoring declared supplier.</span>`
-        : `<button class="act ghost" id="goNewQuery">Start a new query</button>
-           <span class="hint" style="margin:0">Creates a separate chain of custody.</span>`}
-    </div>
-  </div>
-
-  ${p?.snapshot?`<div class="card">
-    <div class="klabel">Stage 2–4 · snapshot, signature, anchor</div>
-    <pre class="blob">${pretty(p.snapshot)}</pre>
-    <div class="klabel" style="margin-top:12px">snapshot_hash · SHA-256 over canonical JSON</div>
-    <div class="mono">${esc(p.snapshot_hash)}</div>
-    <div class="klabel" style="margin-top:12px">platform signature · ECDSA P-256</div>
-    <div class="mono" style="color:var(--slate)">${esc(p.anchor.platform_signature)}</div>
-    <div class="klabel" style="margin-top:12px">anchor</div>
-    <div class="mono">block ${p.anchor.block} · ${esc(p.anchor.block_timestamp)}</div>
-    <div class="note">Signing binds the commitment to a key. It does not make the commitment true — the platform is signing its own account of its own decision.</div>
-  </div>`:''}
-
-  ${p?.custody?`<div class="card">
-    <div class="klabel">Stage 5 · custody manifest</div>
-    <p class="hint">Model <b>${esc(modelName(p.custody.model))}</b> · retained until ${esc(p.custody.retention_until)}</p>
-    ${(p.custody.holders??[]).map(h=>`<div class="hold"><span class="hn">${esc(holderName(h.holder))}</span>
-      <span>${esc(h.label)}<br><span class="mono" style="color:var(--slate2);font-size:10.5px">ack ${short(h.ack_signature,28)}…</span></span></div>`).join('')}
-    <div class="note">Each holder signed an acknowledgement that it holds the preimage. A holder that later cannot produce it is contradicting its own signature, rather than merely asserting bad luck.</div>
-  </div>`:''}`;
-};
-
-V.schema = () => {
-  const p = cur();
-  if(!p) return emptyView('Schema inspector','Commit a proof first — there is nothing to hash yet.');
-  if(!p.snapshot) return emptyView('Schema inspector',
-    `The evidence for ${p.proof_id} is not retrievable, so there are no bytes to inspect. The anchor still verifies — see the auditor.`);
-  const bytes = p.canonical_bytes;
-  const diff = p.byteDiff;
-  const seg = canonSegments(p.snapshot);
-  return `
-  <div class="eyebrow">Role 03 · Schema inspector</div>
-  <h1>What exactly gets hashed</h1>
-  <p class="lede">Everyone assumes the pretty JSON is what is hashed. It is not. The canonical byte string below is the actual input to SHA-256, and the difference is where reproducibility lives.</p>
-
-  <div class="card">
-    <div class="klabel">1 · snapshot object — pretty-printed, NOT what is hashed</div>
-    <pre class="blob">${pretty(p.snapshot)}</pre>
-  </div>
-
-  <div class="card">
-    <div class="klabel">2 · canonical byte string — recursively key-sorted, no whitespace. THIS is hashed.</div>
-    <pre class="blob cbytes" style="color:#E8EEF2">${canonHtml(seg.canonical, seg.segs)}</pre>
-    <div class="actrow" style="margin-top:10px">
-      <span class="tag ${seg.canonical===p.canonical?'t-ok':'t-bad'}">${seg.canonical===p.canonical?'reconstructed byte-for-byte in this browser':'MISMATCH vs server'}</span>
-      <span class="tag t-idle">${bytes} bytes</span>
-      <button class="act ghost" id="copyCanon">Copy</button>
-    </div>
-    <div class="note">Hover a field to see exactly which bytes it occupies. Note the key order: the object above is written in schema order, this string is sorted. Two servers that disagree about ordering produce two different hashes for identical data, so the ordering rule is part of the contract, not a style choice.</div>
-    <table style="margin-top:14px"><thead><tr><th>Field</th><th>Bytes</th><th>Offset</th><th>Share of input</th></tr></thead><tbody>
-      ${seg.segs.map(s=>`<tr class="frow" data-f="${esc(s.key)}">
-        <td class="fk">${esc(s.key)}</td>
-        <td class="num">${s.bytes}</td>
-        <td class="num" style="color:var(--slate)">${s.start}–${s.end}</td>
-        <td class="num" style="color:var(--slate)">${(s.bytes/seg.canonical.length*100).toFixed(1)}%</td>
-      </tr>`).join('')}
-    </tbody></table>
-  </div>
-
-  <div class="card">
-    <div class="klabel">3 · derivation, recomputed in this browser</div>
-    <div class="derive">
-      <div class="step on"><div class="sh">candidate → canon() → SHA-256 → leaf</div><div class="sv">${p.snapshot.candidate_count} salted leaves, sorted by id</div></div>
-      <div class="step on"><div class="sh">leaves → pairwise SHA-256 → merkle root</div><div class="sv">${esc(p.merkle_root)}</div></div>
-      <div class="step on"><div class="sh">snapshot → canon() → byte string</div><div class="sv">${bytes} bytes</div></div>
-      <div class="step ${p.recomputed===p.snapshot_hash?'on':''}"><div class="sh">→ SHA-256 → snapshot_hash</div>
-        <div class="sv">${esc(p.recomputed ?? '—')} ${p.recomputed?`<span class="tag ${p.recomputed===p.snapshot_hash?'t-ok':'t-bad'}">${p.recomputed===p.snapshot_hash?'matches server':'MISMATCH'}</span>`:''}</div></div>
-      <div class="step on"><div class="sh">→ slice(0,10) → proof_id</div><div class="sv">${esc(p.proof_id)}</div></div>
-      <div class="step on"><div class="sh">→ ECDSA P-256 → signature → anchor payload</div><div class="sv">block ${p.anchor.block}</div></div>
-    </div>
-  </div>
-
-  ${diff?`<div class="card">
-    <div class="klabel">4 · byte-level tamper diff — the avalanche effect</div>
-    <p class="hint">A holder is serving evidence that differs from the anchored commitment. Both canonical strings, aligned:</p>
-    <div class="klabel" style="margin-top:10px">anchored / authentic</div>
-    <pre class="blob">${diff.aHtml}</pre>
-    <div class="klabel" style="margin-top:10px">served by ${esc(diff.holder)}</div>
-    <pre class="blob">${diff.bHtml}</pre>
-    <div class="klabel" style="margin-top:12px">digests — differing bits highlighted</div>
-    <div class="bits">${diff.bitsHtml}</div>
-    <div class="note"><b>${diff.byteDiff} of ${diff.byteTotal} bytes differ — ${diff.bytePct}% of the input, across ${diff.edits} edit${diff.edits===1?'':'s'} → ${diff.bitDiff} of 256 bits differ, ${diff.bitPct}% of the output.</b>
-    A change this small in the input is indistinguishable from a total rewrite in the output. There is no partial match, no “close”, and no way to steer a digest toward the anchored one — which is why editing evidence after anchoring cannot be done quietly.</div>
-  </div>`:''}
-
-  <div class="card">
-    <div class="klabel">5 · deliberately NOT committed</div>
-    <div class="grid2">
-      <div>
-        <div class="klabel">Never leaves the platform</div>
-        <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--slate);line-height:1.7">
-          <li>commission <b>rates</b> and <b>amounts</b> — only a per-candidate binary</li>
-          <li>ranking <b>weights</b> and the rule's content — only a version pointer</li>
-          <li>requester identity</li>
-          <li>supplier contact data</li>
-          <li>the agent's internal scores and reasoning</li>
-        </ul>
-      </div>
-      <div>
-        <div class="klabel">Visible to anyone holding the preimage</div>
-        <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--slate);line-height:1.7">
-          <li>every candidate name and unit price</li>
-          <li>every salt, and so the ability to rebuild every leaf</li>
-          <li>the full pool, including who was not recommended</li>
-          <li>the raw query string</li>
-        </ul>
-      </div>
-    </div>
-    <div class="note">The privacy claim is about the <b>anchor</b>, not the blob. The anchor carries a hash and nothing else; the blob carries everything. Which is why who holds the blob — the custody model — is a privacy decision as much as an availability one.</div>
-    <div class="note bad"><b>Known hole.</b> <span class="mono">ranking_rule_id</span> is a pointer chosen by the party under audit. Nothing binds the id to the rule's content, so the rule can be rewritten behind a stable label, or a fresh id minted per buyer. Committing <span class="mono">SHA-256(canon(rule_definition))</span> would close it without disclosing the rule — it is a v2 schema change and is not implemented.</div>
-  </div>`;
-};
-
-V.supplier = () => {
-  const p = cur();
-  const r = p?.receipts?.length ? p.receipts : null;
-  const c = p?.coverage;
-  const rows = S.registry.map(sup=>{
-    const rec = r?.find(x=>x.supplier_id===sup.id);
-    let tag = '<span class="tag t-idle">not asked yet</span>';
-    if(rec){
-      if(rec.suppressed) tag='<span class="tag t-warn">signed · never delivered</span>';
-      else if(!rec.asked) tag='<span class="tag t-idle">not sampled</span>';
-      else if(rec.status==='affirm') tag='<span class="tag t-ok">affirms it was queried</span>';
-      else tag='<span class="tag t-bad">denies · never asked</span>';
-    }
-    return `<tr><td class="num">${sup.id}</td><td>${esc(sup.name)}</td>
-      <td>${rec?.signature?`<span class="mono" style="font-size:10.5px;color:var(--slate2)">${short(rec.signature,20)}…</span>`:'—'}</td><td>${tag}</td></tr>`;
-  }).join('');
-
-  return `
-  <div class="eyebrow">Role 04 · Suppliers · independent receipts</div>
-  <h1>Enhanced layer</h1>
-  <p class="lede">Receipt requests go to every supplier in the category registry — not to the list the platform declared. That is what makes a denial possible at all: a supplier that was quietly dropped is still asked, and can still answer.</p>
-
-  <div class="card">
-    <div class="klabel">Stage 6 · request signed receipts from the registry</div>
-    <p class="hint">Suppliers sign offline. No node, no gas, no chain knowledge.</p>
-    <div class="actrow">
-      <label class="klabel" style="margin:0" for="selRouting">Routing</label>
-      <select id="selRouting" style="padding:7px 9px;border:1px solid var(--wire);border-radius:var(--r);background:var(--paper)">
-        <option value="relayer" ${S.routing==='relayer'?'selected':''}>Neutral relayer</option>
-        <option value="legacy" ${S.routing==='legacy'?'selected':''}>Legacy — through the platform</option>
-      </select>
-      <button class="act" id="goReceipts" ${!p||r?'disabled':''}>Send receipt requests</button>
-    </div>
-    ${S.routing==='legacy'?`<div class="note bad"><b>Legacy routing.</b> The platform batches receipts on the suppliers' behalf. Watch what happens to the denials.</div>`:''}
-  </div>
-
-  ${r?`<div class="card">
-    <div class="klabel">Registry responses</div>
-    <table><thead><tr><th>ID</th><th>Supplier</th><th>Signature</th><th>Response</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="klabel" style="margin-top:16px">Coverage — recorded, never rounded up</div>
-    <div class="cov">
-      ${c.affirm?`<div class="c-a" style="flex:${c.affirm}">${c.affirm} affirm</div>`:''}
-      ${c.deny?`<div class="c-d" style="flex:${c.deny}">${c.deny} deny</div>`:''}
-      ${c.uncovered?`<div class="c-u" style="flex:${c.uncovered}">${c.uncovered} uncovered</div>`:''}
-    </div>
-    ${c.uncovered?`<div class="uncov-callout"><span class="dot"></span>
-      <span><b>${c.uncovered} of ${c.total} registry suppliers returned no receipt.</b>
-      That is not agreement and it is not a denial — it is an unanswered question, and it stays counted as one.</span></div>`:''}
-    <div class="note">A missing receipt is recorded as <b>uncovered</b>, never folded into agreement — the difference between “nobody objected” and “nobody was asked” is the entire mechanism.${
-      S.routing==='legacy'?` Under legacy routing the denials were signed and then dropped in transit, so coverage reads clean while the pruning stays invisible.`:''}</div>
-  </div>`:''}`;
-};
-
-V.auditor = () => {
-  const p = cur();
-  const a = p?.audit ?? null;
-  const icon = {ok:'✓',bad:'✕',warn:'!',idle:'·'};
-  return `
-  <div class="eyebrow">Role 05 · Auditor</div>
-  <h1>Pull · recompute · compare</h1>
-  <p class="lede">Nothing below asks the platform to vouch for itself. The server recomputes from the preimage, and this page then recomputes again independently in your browser.</p>
-
-  <div class="card">
-    <div class="klabel">Proof under audit</div>
-    <div class="mono" style="font-size:14px;font-weight:600;margin-bottom:12px">${esc(p?.proof_id ?? '—')}</div>
-    <div class="actrow"><button class="act" id="goVerify" ${!p?'disabled':''}>Run verification</button></div>
-  </div>
-
-  ${a?`
-  ${p.auditStale?`<div class="stalebar"><b>This verdict is out of date.</b> A switch changed after it was computed, so it describes the previous state. Re-run verification.</div>`:''}
-  ${verdictBlock(a,false)}
-  <div class="card checks ${p.auditStale?'stale':''}">
-    ${a.checks.map((c,i)=>`<div class="check">
-      <div class="ic ${c.state}">${icon[c.state]}</div>
-      <div><div class="ct">${i+1}. ${esc(c.title)}</div><div class="cd">${esc(c.detail)}</div></div>
-    </div>`).join('')}
-  </div>
-
-  <div class="card">
-    <div class="klabel">Custody — per holder, never a single aggregate</div>
-    ${(a.checks[1].holders??[]).map(h=>`<div class="hold">
-      <span class="hn">${esc(holderName(h.holder))}</span>
-      <span><span class="tag ${h.state==='AVAILABLE'?'t-ok':h.state==='EXPIRED'?'t-info':'t-bad'}">${h.state}</span>
-      ${h.note?`<div style="color:var(--slate);margin-top:3px;font-size:11.5px">${esc(h.note)}</div>`:''}</span></div>`).join('')}
-    <div class="note">Attribution is per holder. “The evidence is gone” is never the finding — “this named party, which signed that it held a copy, did not produce it” is.</div>
-  </div>
-
-  <div class="card">
-    <div class="klabel">Independent recomputation — in this browser</div>
-    ${p.recomputed?`<div class="mono">${esc(p.recomputed)}</div>
-      <div class="actrow" style="margin-top:8px"><span class="tag ${p.recomputed===p.snapshot_hash?'t-ok':'t-bad'}">${p.recomputed===p.snapshot_hash?'matches the anchor':'does not match the anchor'}</span></div>
-      <div class="note">Computed here from the evidence the server served, using the same pinned <span class="mono">canon()</span>. If this page and the server ever disagreed, that disagreement would itself be the finding.</div>`
-      :`<div class="empty">Evidence was not retrievable, so there is nothing to recompute from.</div>`}
-  </div>
-
-  <div class="card">
-    <div class="klabel">What this does not prove</div>
-    <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--slate);line-height:1.75">
-      <li>A Merkle proof shows <b>inclusion</b>, never <b>completeness</b>. A root cannot prove a set was whole.</li>
-      <li>Coverage shows what was <b>asked</b>, never what <b>exists</b>.</li>
-      <li>A signature binds a commitment to a <b>key</b>, not to a <b>truth</b>.</li>
-      <li>Custody makes withholding <b>visible and attributable</b>, not <b>impossible</b>.</li>
-    </ul>
-  </div>`:''}`;
-};
-
-V.chain = () => {
-  const b = S.chain ?? [];
-  const name = t => ({anchor:'anchor()',keyreg:'registerKey()',receipts:'appendReceipts()',custody:'registerCustody()'})[t] ?? t;
-  return `
-  <div class="eyebrow">Role 06 · Anchor registry</div>
-  <h1>Append-only record</h1>
-  <p class="lede">Real storage, single operator. <span class="mono">anchor()</span> writes once and reverts on a repeat hash. <span class="mono">getAnchor()</span> returns a stored commitment — it does not verify anything; recomputation happens off-chain, in the auditor.</p>
-  <div class="note bad" style="margin-bottom:14px">${esc(S.health?.storage_disclosure ?? '')}</div>
-  ${b.length?b.map(x=>`<div class="blk">
-    <div class="bh"><div class="bt">${name(x.type)}</div><div class="bn">block ${x.block}</div></div>
-    <pre class="blob">${pretty(x)}</pre></div>`).join(''):'<div class="empty">Nothing anchored yet.</div>'}`;
-};
-
-function emptyView(t,m){ return `<div class="eyebrow">ProofChoice</div><h1>${esc(t)}</h1><p class="lede">${esc(m)}</p>`; }
-
-function verdictBlock(a, requesterVoice){
-  const stale = cur()?.auditStale ? ' stale' : '';
-  const T = {
-    pass:         requesterVoice?'This answer holds up':'Verified',
-    partial:      requesterVoice?'Partly verifiable':'Verified with gaps',
-    inconclusive: requesterVoice?'No longer checkable':'Inconclusive — evidence expired',
-    fail:         requesterVoice?'This answer does not hold up':'Verification failed',
-  };
-  return `<div class="verdict ${a.verdict}${stale}" role="status" aria-live="polite">
-    <div class="vt">${T[a.verdict]}</div><div class="vd">${esc(a.summary)}</div></div>`;
-}
-
-/* ============================================================
-   Byte + bit diff — the avalanche effect, computed live
-   ============================================================ */
-/* A minimal character diff, not a prefix/suffix span. This matters:
-   the tamper here edits two characters, and a span-based diff would
-   report ~96% of the input as "changed" because the two edits sit far
-   apart. That would invert the very point being made — the headline
-   is that a TINY input change produces a total output change. Report
-   the edit honestly and the avalanche speaks for itself. */
-function diffSegments(a, b){
-  let lo = 0;
-  while(lo < a.length && lo < b.length && a[lo] === b[lo]) lo++;
-  let hi = 0;
-  while(hi < a.length-lo && hi < b.length-lo && a[a.length-1-hi] === b[b.length-1-hi]) hi++;
-
-  const A = a.slice(lo, a.length-hi), B = b.slice(lo, b.length-hi);
-  const la = A.length, lb = B.length;
-  const head = a.slice(0, lo), tail = a.slice(a.length-hi);
-
-  // Guard: fall back to a single changed region if the middle is huge.
-  if(la * lb > 4000000 || la > 65000 || lb > 65000){
-    return [{t:'eq',s:head},{t:'del',s:A},{t:'ins',s:B},{t:'eq',s:tail}];
+  async function sha256(str){
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
   }
 
-  const W = lb + 1;
-  const dp = new Uint16Array((la+1) * W);
-  for(let i = la-1; i >= 0; i--)
-    for(let j = lb-1; j >= 0; j--)
-      dp[i*W+j] = A[i] === B[j] ? dp[(i+1)*W+j+1] + 1
-                                : Math.max(dp[(i+1)*W+j], dp[i*W+j+1]);
-
-  const out = [];
-  const push = (t,s) => { if(!s) return; const p = out[out.length-1];
-                          if(p && p.t === t) p.s += s; else out.push({t, s}); };
-  push('eq', head);
-  let i = 0, j = 0;
-  while(i < la && j < lb){
-    if(A[i] === B[j]){ push('eq', A[i]); i++; j++; }
-    else if(dp[(i+1)*W+j] >= dp[i*W+j+1]){ push('del', A[i]); i++; }
-    else { push('ins', B[j]); j++; }
-  }
-  push('del', A.slice(i));
-  push('ins', B.slice(j));
-  push('eq', tail);
-  return out;
-}
-
-const renderSide = (segs, keep, cls) =>
-  segs.filter(s => s.t === 'eq' || s.t === keep)
-      .map(s => s.t === 'eq' ? esc(s.s) : `<span class="${cls}">${esc(s.s)}</span>`)
-      .join('');
-function bitDiff(h1,h2){
-  let diff=0, out='';
-  for(let i=0;i<h1.length;i++){
-    const x = parseInt(h1[i],16) ^ parseInt(h2[i],16);
-    const n = (x.toString(2).match(/1/g)||[]).length;
-    diff += n;
-    out += n ? `<i>${h2[i]}</i>` : h2[i];
-  }
-  return {diff, out};
-}
-async function computeByteDiff(P){
-  P.byteDiff = null;
-  const ev = P.evidence;
-  if(!ev?.served || ev.served.length < 2) return;
-  const withHash = [];
-  for(const s of ev.served) withHash.push({...s, canonical: canon(s.blob.snapshot), h: await sha256(canon(s.blob.snapshot))});
-  const good = withHash.find(x=>x.h===P.snapshot_hash);
-  const bad  = withHash.find(x=>x.h!==P.snapshot_hash);
-  if(!good||!bad) return;
-
-  const a = good.canonical, b = bad.canonical;
-  const segs = diffSegments(a, b);
-  const bits = bitDiff(good.h, bad.h);
-  const del = segs.filter(s=>s.t==='del').reduce((n,s)=>n+s.s.length,0);
-  const ins = segs.filter(s=>s.t==='ins').reduce((n,s)=>n+s.s.length,0);
-  const changed = Math.max(del, ins);
-  /* Count edit REGIONS, not segments: a substitution shows up as an
-     adjacent delete+insert pair and is one edit, not two. */
-  let edits = 0;
-  for(let i = 0; i < segs.length; i++)
-    if(segs[i].t !== 'eq' && (i === 0 || segs[i-1].t === 'eq')) edits++;
-
-  P.byteDiff = {
-    holder: bad.holder,
-    aHtml: renderSide(segs,'del','byte-del'),
-    bHtml: renderSide(segs,'ins','byte-ins'),
-    bitsHtml: `<div style="color:var(--slate2);margin-bottom:4px">anchored &nbsp;${esc(good.h)}</div><div>served &nbsp;&nbsp;&nbsp;${bits.out}</div>`,
-    byteDiff: changed, byteTotal: a.length,
-    bytePct: (changed/a.length*100).toFixed(changed/a.length < 0.01 ? 2 : 1),
-    edits,
-    bitDiff: bits.diff, bitPct: (bits.diff/256*100).toFixed(1),
-  };
-}
-
-/* ============================================================
-   Actions
-   ============================================================ */
-function pickWinner(){
-  const set = S.registry.filter(c=>S.draft.declared.has(c.id));
-  return set.length ? set.reduce((a,b)=>b.score>a.score?b:a) : null;
-}
-
-async function refreshEvidence(P){
-  if(!P) return;
-  P.evidence = null; P.recomputed = null; P.byteDiff = null;
-  const r = await api.get('/evidence/'+P.proof_id);
-  P.evidence = r.body;
-  if(r.body?.served?.length){
-    for(const s of r.body.served){
-      const h = await sha256(canon(s.blob.snapshot));
-      if(h === P.snapshot_hash){ P.recomputed = h; break; }
-      P.recomputed = h;
-    }
-    /* A proof re-opened from the ledger has no snapshot until the
-       evidence is served — so derive it, and the canonical bytes with
-       it, from whichever copy hashes to the anchor. */
-    if(!P.snapshot){
-      const authentic = r.body.served.find(async s => true) && r.body.served[0];
-      for(const s of r.body.served){
-        if(await sha256(canon(s.blob.snapshot)) === P.snapshot_hash){
-          P.snapshot = s.blob.snapshot;
-          P.query = P.query ?? s.blob.query;
-          break;
-        }
-      }
-      if(!P.snapshot && authentic) P.snapshot = null;
-    }
-    if(P.snapshot && !P.canonical){
-      P.canonical = canon(P.snapshot);
-      P.canonical_bytes = new TextEncoder().encode(P.canonical).length;
-      P.merkle_root = P.merkle_root ?? P.snapshot.candidate_merkle_root;
-    }
-    await computeByteDiff(P);
-  }
-}
-
-const ACTIONS = {
-  async goAsk(){
-    if(!S.composing) await ACTIONS.goNewQuery();
-    S.role = 'agent';
-  },
-
-  async goAttest(){
-    const w = pickWinner();
-    const r = await api.post('/attest', {
-      query: S.draft.query,
-      candidate_ids: S.registry.filter(c=>S.draft.declared.has(c.id)).map(c=>c.id),
-      winner_id: w.id,
-      custody_model: S.model,
-    });
-    if(!r.ok) return setError('Could not commit the snapshot.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
-    clearError();
-    addProof({ ...r.body, query: S.draft.query,
-               receipts:null, coverage:null, audit:null, auditStale:false });
-    await refreshEvidence(cur());
-    S.role = 'schema';
-  },
-
-  async goReceipts(){
-    const P = cur();
-    const r = await api.post('/receipts', {proof_id:P.proof_id, routing:S.routing});
-    if(!r.ok) return setError('Could not collect receipts.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
-    clearError();
-    P.receipts = r.body.receipts; P.coverage = r.body.coverage;
-    S.role = 'auditor';
-  },
-
-  async goVerify(){
-    const P = cur();
-    const r = await api.get('/verify/'+P.proof_id);
-    if(!r.ok){
-      const msg = r.body?.error ?? `HTTP ${r.status}`;
-      const st = S.health?.store;
-      /* "No anchor" almost always means the proof is not on THIS
-         instance's ledger, rather than that anything is wrong with the
-         proof. Say which, because the remedy is completely different. */
-      if(/no anchor/i.test(msg)){
-        return setError('Verification could not run.',
-          st && !st.persistent
-            ? ` ${P.proof_id} is not on this instance's ledger. The store is "${st.kind}", which is erased on restart and not shared between instances — a proof anchored moments ago can be invisible to the very next request. Attach a persistent store (Redis) and re-anchor.`
-            : ` ${P.proof_id} is not on this instance's ledger (${msg}). The proof itself may be fine — if this deployment runs more than one instance, check they all share the same store.`);
-      }
-      return setError('Verification could not run.', ` ${msg}`);
-    }
-    clearError();
-    P.audit = r.body;
-    P.auditStale = false;
-    if(!P.coverage && r.body.checks?.[5]?.coverage) P.coverage = r.body.checks[5].coverage;
-    await refreshEvidence(P);
-  },
-
-  async btnTamper(){
-    await api.post('/custody-control', {holder:'platform', tamper_proof_id:cur().proof_id});
-    await refreshEvidence(cur());
-    markStale();
-  },
-
-  btnReset(){ S.resetArmed = true; },
-  btnResetCancel(){ S.resetArmed = false; },
-
-  /** Erase the store, then rebuild local state from what remains. */
-  async btnResetGo(){
-    const r = await api.post('/reset-storage');
-    if(!r.ok){
-      S.resetArmed = false;
-      return setError('Could not erase storage.', ' ' + (r.body?.error ?? `HTTP ${r.status}`));
-    }
-    S.proofs = []; S.selected = null; S.composing = true;
-    S.resetArmed = false;
-    S.holderMode = {platform:'serve',buyer:'serve',neutral:'serve'};
-    S.draft = { query: S.draft.query, declared: new Set(S.registry.map(c=>c.id)) };
-    await updateDraftHash();
-    clearError();
-    await loadChain();
-    const el = document.getElementById('selClock'); if(el) el.value = '0';
-    S.role = 'requester';
-  },
-
-  copyCanon(){ navigator.clipboard?.writeText(cur()?.canonical ?? ''); },
-
-  /* A new query is a new chain of custody: reset the draft and clear
-     the selection so the strip reads as awaiting, not as the previous
-     proof's state. */
-  async goNewQuery(){
-    S.composing = true;
-    S.draft = { query: S.draft.query, declared: new Set(S.registry.map(c=>c.id)) };
-    await updateDraftHash();
-    clearError();
-    S.role = 'requester';
-  },
-};
-
-async function loadChain(){ S.chain = (await api.get('/chain?limit=60')).body; }
-
-/* ------------------------------------------------------------
-   The ledger is append-only and survives restarts, so the console
-   reads its proofs back out of it rather than forgetting everything
-   on reload. Each anchor becomes a stub; the rest is fetched lazily
-   when that proof is selected, because the evidence for an old proof
-   may legitimately be withheld, lost or expired — and finding that
-   out is itself part of the demonstration.
-   ------------------------------------------------------------ */
-async function loadProofs(){
-  const blocks = (await api.get('/chain?limit=200')).body ?? [];
-  const anchors = blocks.filter(b=>b.type==='anchor').sort((a,b)=>a.block-b.block);
-  S.proofs = anchors.map(a=>({
-    proof_id: 'PC-' + a.snapshot_hash.slice(0,10).toUpperCase(),
-    snapshot_hash: a.snapshot_hash,
-    anchor: a, custody: null, snapshot: null, canonical: null,
-    query: null, receipts: null, coverage: null,
-    audit: null, auditStale: false,
-    evidence: null, recomputed: null, byteDiff: null,
-    hydrated: false,
-  }));
-  if(S.proofs.length){
-    S.selected = S.proofs[S.proofs.length - 1].proof_id;   // latest by default
-    S.composing = false;
-    await hydrate(cur());
-  } else {
-    S.composing = true;
-  }
-}
-
-/** Fill in everything the ledger and custody layer can still give us. */
-async function hydrate(P){
-  if(!P) return;
-  const [meta, rc] = await Promise.all([
-    api.get('/proof/' + P.proof_id),
-    api.get('/receipts/' + P.proof_id),
-  ]);
-  if(meta.ok){ P.custody = meta.body.custody ?? null; P.anchor = meta.body.anchor ?? P.anchor; }
-  if(rc.ok){ P.receipts = rc.body.receipts ?? null; P.coverage = rc.body.coverage ?? null; }
-  await refreshEvidence(P);      // may fail — that is a finding, not an error
-  P.hydrated = true;
-}
-
-/* ============================================================
-   Render + wiring
-   ============================================================ */
-const HOLDERS = [
-  ['platform','Platform — the party under audit'],
-  ['buyer','Requester copy'],
-  ['neutral','Neutral custodian'],
-];
-const MODES = ['serve','withhold','lost','unresponsive'];
-
-function renderRail(){
-  document.getElementById('roles').innerHTML = ROLES.map(r=>`
-    <button class="role ${S.role===r.id?'on':''}" data-role="${r.id}" ${S.role===r.id?'aria-current="page"':''}>
-      <div class="rname">${esc(r.name)}</div><div class="rlim">${esc(r.lim)}</div></button>`).join('');
-
-  const sel = document.getElementById('selModel');
-  if(!sel.options.length && S.health){
-    sel.innerHTML = S.health.custody_models.map(m=>`<option value="${m}">${esc(modelName(m))}</option>`).join('');
-    sel.value = S.model;
-  }
-  sel.disabled = !S.composing;
-  document.getElementById('modelNote').textContent = S.composing
-    ? (MODEL_NOTES[S.model] ?? '')
-    : 'Locked for this proof. Start a new query to choose a different model.';
-
-  document.getElementById('holderCtl').innerHTML = HOLDERS.map(([id,label])=>`
-    <label for="hm_${id}">${esc(label)}</label>
-    <select id="hm_${id}" data-holder="${id}">
-      ${MODES.map(m=>`<option value="${m}" ${S.holderMode?.[id]===m?'selected':''}>${m}</option>`).join('')}
-    </select>`).join('');
-
-  document.getElementById('btnTamper').disabled = !cur();
-
-  const rb = document.getElementById('resetBox');
-  if(rb){
-    rb.innerHTML = S.resetArmed
-      ? `<button class="reset arm" id="btnResetGo">Erase — confirm</button>
-         <button class="reset" id="btnResetCancel">Cancel</button>
-         <div class="resetnote">Erases the ledger, the custody blobs and every proof from
-           <b>${esc(S.health?.store?.kind ?? 'the store')}</b>. Existing proof IDs stop verifying.
-           This is the operator deleting the record — the one thing a single-operator store cannot resist.</div>`
-      : `<button class="reset" id="btnReset">Reset storage</button>`;
-  }
-}
-
-/* Display names for wire values. The identifiers `buyer` and
-   `buyer-copy` are frozen: they are written into the on-chain custody
-   manifest and into each holder's SIGNED acknowledgement, so renaming
-   them would break re-opening every proof already anchored. The role
-   is presented as the Requester; the wire keeps its original name. */
-const MODEL_LABELS = {
-  'platform-held':'Platform-held',
-  'buyer-copy':'Requester copy',
-  'escrow':'Neutral escrow',
-  'hybrid':'Hybrid — all three',
-};
-const HOLDER_LABEL = { platform:'platform', buyer:'requester', neutral:'neutral' };
-const holderName = id => HOLDER_LABEL[id] ?? id;
-const modelName  = m  => MODEL_LABELS[m] ?? m;
-
-const MODEL_NOTES = {
-  'platform-held':'The party under audit holds the only copy. Withholding is a unilateral act.',
-  'buyer-copy':'Withholding now needs the platform and the requester it harmed.',
-  'escrow':'Unavailability becomes attributable to a party with no stake in the outcome.',
-  'hybrid':'Three parties with divergent interests must all decline. Each refusal is named.',
-};
-
-function renderDisclosure(){
-  const h = S.health;
-  if(!h) return;
-  const problems = [];
-  if(!h.store.persistent) problems.push('The ledger is in process memory: it is erased on restart and is not shared between instances, so it cannot support a claim about history.');
-  if(h.key_source==='ephemeral') problems.push('The platform signing key was generated by this instance and will be lost on restart, so older anchors would verify against an unregistered key.');
-  const el = document.getElementById('disclose');
-  /* Silent when the deployment can back what it shows. It speaks up
-     only when it cannot — which is the case worth interrupting for. */
-  el.innerHTML = problems.length
-    ? `<b>This deployment cannot back everything the UI shows.</b>${problems.map(p=>' '+esc(p)).join('')}`
-    : '';
-}
-
-function render(){
-  renderDisclosure();
-  renderRail();
-  renderStrip();
-  document.getElementById('stage').innerHTML = errorBlock() + (V[S.role] ?? V.requester)();
-
-  /* Announce the view change and put focus somewhere sensible, rather
-     than swapping the whole stage out in silence. */
-  const h1 = document.querySelector('#stage h1');
-  if(h1){ h1.setAttribute('tabindex','-1'); if(S.focusStage){ h1.focus(); S.focusStage = false; } }
-
-  /* Hovering a field highlights its bytes, and vice versa. */
-  const mark = (key, on) => document.querySelectorAll(`[data-f="${CSS.escape(key)}"]`)
-    .forEach(el => el.classList.toggle('hl', on));
-  document.querySelectorAll('[data-f]').forEach(el=>{
-    const k = el.dataset.f;
-    el.addEventListener('mouseenter', ()=>mark(k,true));
-    el.addEventListener('mouseleave', ()=>mark(k,false));
-  });
-
-  document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>{
-    S.role=b.dataset.role; S.focusStage = true;
-    if(S.role==='chain') loadChain().then(render); else render();
-  });
-  document.querySelectorAll('[data-cand]').forEach(b=>b.onchange=()=>{
-    b.checked ? S.draft.declared.add(b.dataset.cand) : S.draft.declared.delete(b.dataset.cand);
-    render();
-  });
-  document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{
-    S.role = b.dataset.goto;
-    if(S.role==='chain') loadChain().then(render); else render();
-  });
-  document.querySelectorAll('[data-holder]').forEach(sel=>sel.onchange=async()=>{
-    S.holderMode = {...(S.holderMode??{}), [sel.dataset.holder]: sel.value};
-    await api.post('/custody-control',{holder:sel.dataset.holder, mode:sel.value});
-    markStale(); await refreshEvidence(cur()); render();
-  });
-  const ex = document.getElementById('errX');
-  if(ex) ex.onclick = () => { clearError(); render(); };
-
-  const qi = document.getElementById('qInput');
-  if(qi) qi.oninput = async () => {
-    S.draft.query = qi.value;
-    await updateDraftHash();
-    renderStrip();          // strip only — a full render would steal focus from the field
-  };
-
-  /* Switching proofs shows that proof's own chain of custody. */
-  document.querySelectorAll('[data-proof]').forEach(b=>b.onclick=async()=>{
-    S.selected = b.dataset.proof; S.composing = false;
-    const P = cur();
-    if(P && !P.hydrated) await hydrate(P);
-    render();
-  });
-
-  const sm = document.getElementById('selModel');
-  sm.onchange = () => { S.model = sm.value; render(); };
-  const sc = document.getElementById('selClock');
-  sc.onchange = async () => {
-    await api.post('/custody-control',{advance_months:Number(sc.value)});
-    markStale(); await refreshEvidence(cur()); render();
-  };
-  const sr = document.getElementById('selRouting');
-  if(sr) sr.onchange = () => { S.routing = sr.value; render(); };
-
-  for(const [id,fn] of Object.entries(ACTIONS)){
-    const el = document.getElementById(id);
-    if(!el) continue;
-    el.onclick = async () => {
-      el.disabled = true;
-      document.getElementById('stage').classList.add('spin');
-      try { await fn(); } catch(e){ setError('Something went wrong.', ' ' + e.message); }
-      document.getElementById('stage').classList.remove('spin');
-      render();
+  let seq = 0;
+  async function recompute(){
+    const mine = ++seq;
+    const ids = REGISTRY.filter(s => declared.has(s.id)).map(s => s.id);
+    const snapshot = {
+      schema_version: 'pc.snapshot.v1',
+      query: '3 nights, Hong Kong, under HK$1,600',
+      ranking_rule_id: 'rr.value-weighted.v2',
+      candidate_count: ids.length,
+      candidate_ids: ids,
+      winner_id: declared.has(WINNER) ? WINNER : (ids[0] ?? null),
     };
-  }
-}
+    const c = canon(snapshot);
+    canonOut.innerHTML = paint(c);
 
-/* ---------- boot ---------- */
-(async function boot(){
-  const [h, reg] = await Promise.all([api.get('/health'), api.get('/registry')]);
-  S.health = h.body; S.registry = reg.body;
-  S.draft.declared = new Set(S.registry.map(c=>c.id));
-  await updateDraftHash();
-  S.model = S.health.default_custody_model ?? 'hybrid';
-  S.holderMode = {platform:'serve',buyer:'serve',neutral:'serve'};
-
-  const st = S.health.store;
-  const chip = document.getElementById('chipStore');
-  chip.textContent = `store: ${st.kind}${st.persistent?'':' · ephemeral'}`;
-  chip.className = 'chip' + (st.persistent ? '' : ' bad');
-  /* The standing disclosure, kept reachable without a permanent
-     banner. Both sentences come from the server, not from this page. */
-  chip.title = [S.health.trust_disclosure, S.health.storage_disclosure].filter(Boolean).join('\n\n');
-  const kc = document.getElementById('chipKeys');
-  kc.textContent = `keys: ${S.health.key_source}`;
-  kc.className = 'chip' + (S.health.key_source==='ephemeral' ? ' warn' : '');
-  kc.title = S.health.key_source === 'env'
-    ? 'Signing keys come from PC_KEYS, so the platform identity is stable across restarts and instances.'
-    : `Signing keys resolved from: ${S.health.key_source}.`;
-  document.getElementById('chipMcp').textContent = `MCP ${S.health.mcp_protocol_versions[0]}`;
-
-  await loadChain();
-
-  /* Re-opening the ledger must never be able to blank the page. A
-     proof whose preimage is withheld, lost or expired is a normal
-     outcome here, and a console that dies on one would hide exactly
-     the finding it exists to show. */
-  try {
-    await loadProofs();
-  } catch (e) {
-    S.composing = true;
-    setError('Could not re-open earlier proofs.',
-      ` ${e.message}. The ledger is unaffected — start a new query, or check the anchor registry.`);
+    const h = await sha256(c);
+    if (mine !== seq) return;                  // a later click already won
+    hashOut.textContent = h;
+    pidOut.textContent = 'PC-' + h.slice(0,10).toUpperCase();
   }
 
-  render();
-  if(S.health.dev) devReload();
+  for (const s of REGISTRY){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cand in' + (s.id === WINNER ? ' win' : '');
+    b.innerHTML = '<span class="d"></span>' + s.id;
+    b.title = s.name + ' — HK$' + s.price + (s.id === WINNER ? ' · declared winner' : '');
+    b.setAttribute('aria-pressed', 'true');
+    b.addEventListener('click', () => {
+      const nowIn = !declared.has(s.id);
+      nowIn ? declared.add(s.id) : declared.delete(s.id);
+      /* Never let the set empty out — canon() would still hash it, but
+         a zero-candidate snapshot is a nonsense to put on screen. */
+      if (!declared.size) { declared.add(s.id); return; }
+      b.classList.toggle('in', nowIn);
+      b.classList.toggle('out', !nowIn);
+      b.setAttribute('aria-pressed', String(nowIn));
+      recompute();
+    });
+    candsEl.appendChild(b);
+  }
+  recompute();
 })();
 
-/* ============================================================
-   Dev reload — local only, and only when /health says so.
-   Two triggers, one channel:
-     · a file under public/ changed  → server pushes "reload"
-     · the server restarted (node --watch) → the stream drops, the
-       browser reconnects, sees a different boot id, and reloads
-   EventSource reconnects on its own, so there is no retry loop here.
-   ============================================================ */
-function devReload(){
+/* ---------- integrate: code panes ---------- */
+(function(){
+  const tabs = [...document.querySelectorAll('.tab')];
+  if(!tabs.length) return;
+  for (const t of tabs){
+    t.addEventListener('click', () => {
+      for (const o of tabs){
+        const on = o === t;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', String(on));
+        document.getElementById('pane-' + o.dataset.pane).hidden = !on;
+      }
+    });
+  }
+})();
+
+/* ---------- dev reload, local only ----------
+   The server pushes over SSE when public/ changes; /dev/events simply
+   404s in production, so the EventSource stays closed and costs
+   nothing. Same mechanism the console uses. */
+(function(){
+  if(!/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
   let boot = null;
   const es = new EventSource('/dev/events');
   es.addEventListener('hello', e => {
     const id = JSON.parse(e.data).boot;
-    if(boot && id !== boot) return location.reload();   // restarted underneath us
+    if (boot && boot !== id) location.reload();
     boot = id;
-    flag('live');
   });
   es.addEventListener('reload', () => location.reload());
-  es.onerror = () => flag('reconnecting…');
-
-  function flag(text){
-    let el = document.getElementById('devchip');
-    if(!el){
-      el = document.createElement('div');
-      el.id = 'devchip'; el.className = 'chip';
-      el.style.cssText = 'border-color:#BFD5C6;background:var(--seal-lite);color:var(--seal)';
-      document.querySelector('.masthead').appendChild(el);
-    }
-    el.textContent = 'dev · ' + text;
-  }
-}
+})();
 </script>
 </body>
 </html>

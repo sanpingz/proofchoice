@@ -6,6 +6,7 @@
     }
   },
   "rewrites": [
+    { "source": "/demo", "destination": "/demo.html" },
     { "source": "/(.*)", "destination": "/api?__p=/$1" }
   ],
   "headers": [

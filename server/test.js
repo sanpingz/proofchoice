@@ -291,11 +291,14 @@ async function protocol() {
 /* ============================================================
    3.5 — canon() parity across implementations
    ------------------------------------------------------------
-   canon() exists three times: in server/core.js, inlined in the
-   offline prototype, and inlined in the console. The console's
-   whole claim is that it verifies the server INDEPENDENTLY rather
-   than displaying its verdict — which is worth nothing if the two
-   canonicalisers have quietly drifted apart.
+   canon() exists four times: in server/core.js, inlined in the
+   offline prototype, inlined in the console, and inlined in the
+   landing page, whose hero widget hashes a snapshot live. The
+   console's whole claim is that it verifies the server INDEPENDENTLY
+   rather than displaying its verdict — which is worth nothing if the
+   canonicalisers have quietly drifted apart. The landing page is held
+   to the same standard: a marketing page that showed a hash the
+   server would not produce is a lie in the shop window.
 
    Compared by BEHAVIOUR, not by text: the copies are formatted
    differently on purpose and a string comparison would fail for
@@ -303,7 +306,7 @@ async function protocol() {
    ============================================================ */
 
 async function canonParity() {
-  section('canon() parity — server vs console vs prototype');
+  section('canon() parity — server vs console vs site vs prototype');
 
   const { readFileSync, existsSync } = await import('node:fs');
   const { dirname, join } = await import('node:path');
@@ -312,7 +315,8 @@ async function canonParity() {
 
   const CANDIDATES = {
     server: ['server/core.js'],
-    console: ['public/index.html'],
+    console: ['public/demo.html'],
+    site: ['public/index.html'],
     prototype: ['prototype/prototype.html', 'prototype.html'],
   };
 
@@ -349,7 +353,7 @@ async function canonParity() {
    * the reconstruction drifted from canon() the highlighting would be
    * a lie about the one thing that view exists to show. */
   section('Console byte-span mapping');
-  const consoleSrc = readFileSync(join(root, 'public/index.html'), 'utf8');
+  const consoleSrc = readFileSync(join(root, 'public/demo.html'), 'utf8');
   const grabFn = name => {
     const m = consoleSrc.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
     return m ? m[0] : null;
@@ -597,7 +601,7 @@ async function consoleProofs() {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
   /* Everything up to the boot IIFE: the definitions, none of the
    * start-up that expects a live DOM and a real server. */
-  const full = readFileSync(join(root, 'public/index.html'), 'utf8')
+  const full = readFileSync(join(root, 'public/demo.html'), 'utf8')
     .match(/<script>([\s\S]*?)<\/script>/)[1];
   const src = full.split('/* ---------- boot ---------- */')[0];
   eq(src.length < full.length, true, 'console source splits cleanly at the boot marker');
