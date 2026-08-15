@@ -106,7 +106,7 @@ export class FsStore {
    (UPSTASH_REDIS_REST_*).
    ------------------------------------------------------------ */
 export class RedisStore {
-  kind = 'redis';
+  kind = 'upstash-rest';
   persistent = true;
   shared = true;
   /* Other instances can append between our requests, so the chain
@@ -148,6 +148,95 @@ export class RedisStore {
   async list(key) { return (await this._cmd('LRANGE', this._k(key + ':log'), 0, -1)) ?? []; }
 
   async ping() { await this._cmd('PING'); return true; }
+}
+
+/* ------------------------------------------------------------
+   Redis over TCP, via node-redis. The best fit for this workload:
+   the two properties the ledger depends on are native, atomic, and
+   hold across concurrent instances without any retry loop.
+
+     setNX  → SET key value NX   ('OK' or null)
+     append → RPUSH key line     (returns the new length, which IS
+                                  the block number)
+
+   Object storage had to emulate both — create-if-absent plus an
+   ETag compare-and-swap that rewrote the whole log per append. This
+   is what that machinery was standing in for.
+
+   SERVERLESS CAVEAT. A TCP connection is per-instance and the
+   platform freezes instances between invocations, so a socket can
+   be dead on resume. Handled by: a lazily-created singleton that is
+   never cached on failure, a bounded reconnect strategy so a dead
+   endpoint fails fast instead of hanging, and node-redis's offline
+   queue left ON so commands wait for a reconnect rather than
+   erroring.
+
+   Deliberately NO automatic command retry. RPUSH is not idempotent:
+   if it succeeded and only the reply was lost, a retry would append
+   the same chain record twice. A duplicated ledger entry is worse
+   than a surfaced error.
+   ------------------------------------------------------------ */
+export class RedisClientStore {
+  kind = 'redis';
+  persistent = true;
+  shared = true;
+  refreshBetweenRequests = true;
+
+  constructor({ url, prefix = 'pc:' } = {}) {
+    this.url = url;
+    this.prefix = prefix;
+    this._p = null;
+  }
+
+  async client() {
+    if (!this._p) {
+      this._p = (async () => {
+        let createClient;
+        try { ({ createClient } = await import('redis')); }
+        catch (e) {
+          throw new Error(`The redis store needs the redis package: npm install redis. (${e.message})`);
+        }
+        const c = createClient({
+          url: this.url,
+          /* Bounded: a wrong URL should fail the request, not hang it. */
+          socket: { reconnectStrategy: retries => (retries > 5 ? new Error('redis: giving up reconnecting') : Math.min(retries * 200, 2000)) },
+          pingInterval: 30000,
+        });
+        c.on('error', err => console.error('redis:', err.message));
+        await c.connect();
+        return c;
+      })().catch(e => { this._p = null; throw e; });   // never cache a failure
+    }
+    return this._p;
+  }
+
+  _k(key) { return this.prefix + key; }
+
+  async get(key) { return (await (await this.client()).get(this._k(key))) ?? null; }
+  async set(key, value) { await (await this.client()).set(this._k(key), value); }
+
+  /** Atomic create-if-absent. This is what makes anchor() write-once
+   *  across concurrent instances. v6 deprecates `NX: true`. */
+  async setNX(key, value) {
+    return (await (await this.client()).set(this._k(key), value, { condition: 'NX' })) === 'OK';
+  }
+
+  async has(key) { return (await (await this.client()).exists(this._k(key))) === 1; }
+  async del(key) { await (await this.client()).del(this._k(key)); }
+
+  /** RPUSH returns the new list length, so block numbers stay unique
+   *  and equal to log positions even under concurrent writers. */
+  async append(key, line) { return (await this.client()).rPush(this._k(key + ':log'), line); }
+
+  async list(key) { return (await (await this.client()).lRange(this._k(key + ':log'), 0, -1)) ?? []; }
+
+  async ping() { await (await this.client()).ping(); return true; }
+
+  async close() {
+    if (!this._p) return;
+    const p = this._p; this._p = null;
+    try { await (await p).destroy(); } catch {}
+  }
 }
 
 /* ------------------------------------------------------------
@@ -329,9 +418,17 @@ export class MemoryStore {
    Selection
    ------------------------------------------------------------ */
 
+/** Providers disagree on the variable name, so accept the usual set
+ *  rather than making the user rename one. PC_REDIS_URL always wins. */
+export function redisUrlFromEnv() {
+  return process.env.PC_REDIS_URL ?? process.env.REDIS_URL ?? process.env.KV_URL ??
+         process.env.REDIS_TLS_URL ?? process.env.UPSTASH_REDIS_URL ?? null;
+}
+
 export function storeFromEnv({ dataDir } = {}) {
-  const url = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+  const restUrl = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+  const restToken = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+  const redisUrl = redisUrlFromEnv();
   const forced = process.env.PC_STORE;
 
   /* A connected Blob store authenticates by OIDC (BLOB_STORE_ID +
@@ -344,10 +441,14 @@ export function storeFromEnv({ dataDir } = {}) {
   if (forced === 'memory') return new MemoryStore();
   if (forced === 'fs') return new FsStore(dataDir);
   if (forced === 'blob') return new BlobStore(blobOpts);
-  if (forced === 'redis') return new RedisStore(url, token);
+  if (forced === 'redis') return new RedisClientStore({ url: redisUrl });
+  if (forced === 'upstash-rest') return new RedisStore(restUrl, restToken);
 
+  /* Redis first: its append and create-if-absent are atomic, which is
+   * exactly what the ledger needs. Blob has to emulate both. */
+  if (redisUrl) return new RedisClientStore({ url: redisUrl });
+  if (restUrl && restToken) return new RedisStore(restUrl, restToken);
   if (blobToken || blobOidc) return new BlobStore(blobOpts);
-  if (url && token) return new RedisStore(url, token);
   /* Serverless without a database: the filesystem is read-only, so
    * memory is the only thing that works — and it forgets. */
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) return new MemoryStore();
@@ -369,10 +470,10 @@ export function storeDisclosure(store) {
       'verifiable the moment it is anchored. Still a single-operator store: it does not resist the ' +
       'operator deleting blobs.';
   }
-  if (store.kind === 'redis') {
-    return 'Ledger persisted to Redis. Write-once anchoring is enforced atomically with SET NX, so it ' +
-      'holds across concurrent instances. Still a single-operator store: it does not resist the ' +
-      'operator deleting keys.';
+  if (store.kind === 'redis' || store.kind === 'upstash-rest') {
+    return 'Ledger persisted to Redis. Write-once anchoring is enforced atomically with SET NX and the ' +
+      'log is appended with RPUSH, so both hold across concurrent instances. Still a single-operator ' +
+      'store: it does not resist the operator deleting keys.';
   }
   return 'Ledger persisted to an append-only file on one host. Single-operator: it does not resist the ' +
     'operator editing the file.';

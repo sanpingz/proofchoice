@@ -25,7 +25,7 @@ import { REGISTRY, Relayer, detectionProbability, sampleForTarget } from './regi
 import { boot, originAllowed } from './server.js';
 import { callTool } from './mcp.js';
 import { handleRpc, SUPPORTED_VERSIONS } from './mcp.js';
-import { FsStore, MemoryStore, BlobStore, storeFromEnv } from './store.js';
+import { FsStore, MemoryStore, BlobStore, RedisClientStore, storeFromEnv } from './store.js';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -343,6 +343,41 @@ async function canonParity() {
   }
   eq(disagreements, 0, `all implementations agree on ${cases.length} cases (unicode, empty keys, nesting, arrays)`);
   eq(impls.server?.({ b: 1, a: 2 }), '{"a":2,"b":1}', 'and still match the pinned golden vector');
+
+  /* The schema inspector highlights which BYTES belong to which field.
+   * It rebuilds the canonical string to compute those offsets, so if
+   * the reconstruction drifted from canon() the highlighting would be
+   * a lie about the one thing that view exists to show. */
+  section('Console byte-span mapping');
+  const consoleSrc = readFileSync(join(root, 'public/index.html'), 'utf8');
+  const grabFn = name => {
+    const m = consoleSrc.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
+    return m ? m[0] : null;
+  };
+  eq(!!grabFn('canonSegments'), true, 'canonSegments() is extractable from the console');
+
+  const canonSegments = eval('(' + grabFn('canonSegments') + ')');
+  const SNAP = {
+    schema_version: 'pc.snapshot.v1',
+    query_hash: 'a'.repeat(64),
+    candidate_merkle_root: 'b'.repeat(64),
+    candidate_count: 8,
+    ranking_rule_id: 'rr.value-weighted.v2',
+    commercial_disclosure: { paid_placement: false, disclosed_supplier_ids: ['SUP-02', 'SUP-05'] },
+    winner_id: 'SUP-01',
+    nonce: '00000000-0000-4000-8000-000000000000',
+    signer_key_id: '0123456789abcdef',
+  };
+  for (const obj of [SNAP, { b: 1, a: 2 }, { only: 'one' }, { z: [1, 2], a: { n: null } }]) {
+    const { canonical, segs } = canonSegments(obj);
+    const label = Object.keys(obj).length === 9 ? 'snapshot' : JSON.stringify(obj).slice(0, 18);
+    eq(canonical, canon(obj), `rebuilt canonical matches canon() — ${label}`);
+    const bad = segs.filter(s => canonical.slice(s.start, s.end) !== s.text);
+    eq(bad.length, 0, `   … every field's byte span slices back to its own text — ${label}`);
+    eq(segs.length, Object.keys(obj).length, `   … one span per top-level field — ${label}`);
+    eq(segs.every((s, i) => i === 0 || s.start > segs[i - 1].end - 1), true,
+       `   … spans are ordered and non-overlapping — ${label}`);
+  }
 }
 
 /* ============================================================
@@ -435,14 +470,29 @@ async function storage() {
   eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'memory', 'on Vercel with no KV configured → memory store');
   process.env.KV_REST_API_URL = 'https://example.upstash.io';
   process.env.KV_REST_API_TOKEN = 'tok';
-  eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'redis', 'on Vercel with KV configured → redis store');
+  eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'upstash-rest', 'on Vercel with only REST KV vars → upstash-rest store');
 
-  /* A connected Blob store wins, per the chosen storage shape. */
+  /* Redis over TCP outranks everything else: its append and
+   * create-if-absent are atomic, which the ledger depends on. */
   process.env.BLOB_READ_WRITE_TOKEN = 'vercel_blob_rw_STOREID_secret';
+  process.env.REDIS_URL = 'rediss://default:pw@example.upstash.io:6379';
+  const r = storeFromEnv({ dataDir: '/tmp/x' });
+  eq(r.kind, 'redis', 'REDIS_URL wins over both Blob and REST KV');
+  eq(r.url, 'rediss://default:pw@example.upstash.io:6379', '   … carries the URL through');
+  eq(r.persistent && r.shared, true, '   … declares itself persistent and shared');
+  delete process.env.REDIS_URL;
+
+  for (const name of ['KV_URL', 'REDIS_TLS_URL', 'UPSTASH_REDIS_URL']) {
+    process.env[name] = 'rediss://x:1';
+    eq(storeFromEnv({ dataDir: '/tmp/x' }).kind, 'redis', `${name} also selects redis`);
+    delete process.env[name];
+  }
+
+  /* Blob only wins once no Redis of either transport is configured. */
+  delete process.env.KV_REST_API_URL; delete process.env.KV_REST_API_TOKEN;
   const blob = storeFromEnv({ dataDir: '/tmp/x' });
-  eq(blob.kind, 'blob', 'with a Blob token configured → blob store');
+  eq(blob.kind, 'blob', 'with no Redis configured, a Blob token still selects blob');
   eq(blob.access, 'private', '   … defaults to private access');
-  eq(blob.persistent && blob.shared, true, '   … declares itself persistent and shared');
   delete process.env.BLOB_READ_WRITE_TOKEN;
 
   process.env.BLOB_STORE_ID = 'store_abc'; process.env.VERCEL_OIDC_TOKEN = 'oidc';
@@ -464,6 +514,161 @@ async function storage() {
   try { pub._assertPrivate('https://abc.private.blob.vercel-storage.com/pc/x'); }
   catch { allowed = false; }
   eq(allowed, true, '   … a private Blob URL passes');
+}
+
+/* ============================================================
+   4.5 — Redis store against a real socket
+   ------------------------------------------------------------
+   There is no Redis on this machine, and mocking the client would
+   verify nothing: the risky surface is precisely the wire contract —
+   command names, whether SET NX returns 'OK' or null, whether RPUSH
+   returns the new length. So this stands up a minimal RESP server
+   and drives the real node-redis client through a real TCP socket.
+
+   It implements only the seven commands the store uses. That is the
+   point: if the store ever reaches for a command outside that set,
+   this fails loudly rather than silently passing on a mock.
+   ============================================================ */
+
+async function fakeRedis() {
+  const net = await import('node:net');
+  const KV = new Map(), LISTS = new Map();
+  /* node-redis v6 negotiates RESP3, where null is `_` rather than the
+   * RESP2 `$-1`. Getting this wrong is exactly the kind of wire-level
+   * mismatch this test exists to catch. */
+  const bulk = s => (s === null ? '_\r\n' : `$${Buffer.byteLength(s)}\r\n${s}\r\n`);
+  const str = s => `$${Buffer.byteLength(s)}\r\n${s}\r\n`;
+  const HELLO3 =
+    '%7\r\n' +
+    str('server') + str('redis') +
+    str('version') + str('7.4.0') +
+    str('proto') + ':3\r\n' +
+    str('id') + ':1\r\n' +
+    str('mode') + str('standalone') +
+    str('role') + str('master') +
+    str('modules') + '*0\r\n';
+  const seen = new Set();
+
+  /** Returns {args, rest} or null when the buffer holds no whole
+   *  command. Parses on BUFFERS, not strings: RESP length prefixes
+   *  count bytes, and the demo query contains a multi-byte '·', so
+   *  slicing a JS string by byte offsets desyncs the parser and the
+   *  connection hangs. */
+  function parse(b) {
+    if (b.length === 0 || b[0] !== 0x2a /* '*' */) return null;
+    const i = b.indexOf('\r\n');
+    if (i < 0) return null;
+    const n = Number(b.subarray(1, i).toString());
+    let p = i + 2; const args = [];
+    for (let k = 0; k < n; k++) {
+      if (p >= b.length || b[p] !== 0x24 /* '$' */) return null;
+      const j = b.indexOf('\r\n', p);
+      if (j < 0) return null;
+      const len = Number(b.subarray(p + 1, j).toString());
+      const start = j + 2, end = start + len;
+      if (b.length < end + 2) return null;
+      args.push(b.subarray(start, end).toString('utf8'));
+      p = end + 2;
+    }
+    return { args, rest: b.subarray(p) };
+  }
+
+  function handle(args) {
+    const cmd = String(args[0]).toUpperCase();
+    seen.add(cmd);
+    const [, key, val] = args;
+    switch (cmd) {
+      case 'PING': return '+PONG\r\n';
+      case 'HELLO': return HELLO3;
+      case 'CLIENT': case 'INFO': case 'COMMAND': return '+OK\r\n';
+      case 'SET': {
+        const nx = args.slice(3).some(a => String(a).toUpperCase() === 'NX');
+        if (nx && KV.has(key)) return bulk(null);
+        KV.set(key, val); return '+OK\r\n';
+      }
+      case 'GET': return bulk(KV.has(key) ? KV.get(key) : null);
+      case 'EXISTS': return `:${KV.has(key) ? 1 : 0}\r\n`;
+      case 'DEL': { const had = KV.delete(key) ? 1 : 0; LISTS.delete(key); return `:${had}\r\n`; }
+      case 'RPUSH': {
+        const l = LISTS.get(key) ?? []; l.push(...args.slice(2));
+        LISTS.set(key, l); return `:${l.length}\r\n`;
+      }
+      case 'LRANGE': {
+        const l = LISTS.get(key) ?? [];
+        return `*${l.length}\r\n` + l.map(bulk).join('');
+      }
+      default: return `-ERR unsupported command ${cmd}\r\n`;
+    }
+  }
+
+  const srv = net.createServer(sock => {
+    let buf = Buffer.alloc(0);
+    sock.on('error', () => {});
+    sock.on('data', d => {
+      buf = Buffer.concat([buf, d]);
+      let out = '';
+      for (;;) { const p = parse(buf); if (!p) break; buf = p.rest; out += handle(p.args); }
+      if (out) sock.write(out);   // utf8-encoded; bulk() sizes with byteLength
+    });
+  });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  return { port: srv.address().port, close: () => new Promise(r => srv.close(r)), seen };
+}
+
+async function redisStore() {
+  section('Redis store — real node-redis client over a real socket');
+  const fake = await fakeRedis();
+  const store = new RedisClientStore({ url: `redis://127.0.0.1:${fake.port}` });
+  try {
+    eq(await store.ping(), true, 'connects and PINGs');
+    eq(await store.get('nope'), null, 'get() of an absent key is null');
+
+    await store.set('a', 'one');
+    eq(await store.get('a'), 'one', 'set/get round-trips');
+    eq(await store.has('a'), true, 'has() via EXISTS');
+
+    eq(await store.setNX('claim', 'first'), true, 'setNX() succeeds on a free key (SET .. NX → OK)');
+    eq(await store.setNX('claim', 'second'), false, 'setNX() REFUSES an existing key (SET .. NX → null)');
+    eq(await store.get('claim'), 'first', '   … and did not overwrite');
+
+    eq(await store.append('log', 'l1'), 1, 'append() returns the RPUSH length');
+    eq(await store.append('log', 'l2'), 2, '   … which increments');
+    eq(await store.list('log'), ['l1', 'l2'], 'list() via LRANGE, in order');
+    eq(await store.list('empty'), [], 'list() of an absent log is empty');
+
+    const got = await Promise.all([1, 2, 3, 4].map(i => store.append('conc', `c${i}`)));
+    eq(new Set(got).size, 4, 'concurrent appends get distinct positions');
+    eq((await store.list('conc')).length, 4, '   … and none is lost');
+
+    await store.del('a');
+    eq(await store.has('a'), false, 'del()');
+
+    /* Guard against the store quietly depending on a command the
+     * deployment's Redis might not allow. */
+    const allowed = new Set(['PING','HELLO','CLIENT','INFO','COMMAND','SET','GET','EXISTS','DEL','RPUSH','LRANGE']);
+    const extra = [...fake.seen].filter(c => !allowed.has(c));
+    eq(extra, [], 'uses no commands outside the expected set');
+
+    /* The whole application on Redis, not just the store contract. */
+    const ctx = await boot({ store: new RedisClientStore({ url: `redis://127.0.0.1:${fake.port}`, prefix: 'e2e:' }) });
+    const att = await callTool('pc_attest', {
+      query: QUERY, candidate_ids: REGISTRY.map(s => s.id), winner_id: 'SUP-01',
+    }, ctx);
+    await callTool('pc_request_receipts', { proof_id: att._data.proof_id }, ctx);
+    const v = await callTool('pc_verify', { proof_id: att._data.proof_id }, ctx);
+    eq(v._data.verdict, 'pass', 'full attest → receipts → verify round trip on Redis');
+    eq(ctx.chain.blocks.map(b => b.block), ctx.chain.blocks.map((_, i) => i + 1),
+       '   … block numbers equal log positions');
+    let reverted = false;
+    try {
+      await ctx.chain.anchor({ snapshot_hash: att._data.snapshot_hash, platform_signature: 'x', signer_key_id: 'y' });
+    } catch (e) { reverted = e.code === 'ALREADY_ANCHORED'; }
+    eq(reverted, true, '   … anchor() still reverts on a repeat hash (SET NX)');
+    await ctx.store.close();
+  } finally {
+    await store.close();
+    await fake.close();
+  }
 }
 
 /* ============================================================
@@ -507,6 +712,7 @@ await protocol();
 await canonParity();
 await origins();
 await storage();
+await redisStore();
 await writeOnce();
 
 console.log(`\n${fail ? '\x1b[31m' : '\x1b[32m'}${pass} passed, ${fail} failed\x1b[0m\n`);

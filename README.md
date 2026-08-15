@@ -40,10 +40,10 @@ npx vercel --prod         # deploy — read Deploying to Vercel first
 Node 20+ (developed on 26). No bundler, no framework — the scripts are plain `node` invocations, so
 `node server/server.js` works just as well.
 
-**One optional dependency.** `@vercel/blob` is needed *only* by the Vercel Blob storage backend, and
-it is imported dynamically: the filesystem, memory and Redis backends run with no `node_modules` at
-all, and the test suite passes without it. Run `npm install` only if you are deploying against a
-Blob store.
+**Two optional dependencies**, both imported dynamically: `redis` for the Redis backend and
+`@vercel/blob` for the Blob one. The filesystem and memory backends run with no `node_modules` at
+all, and most of the test suite passes without either. Run `npm install` when deploying against a
+real store.
 
 Open <http://127.0.0.1:8787/> for the console. A local HTTP proxy will intercept `localhost` from
 curl — pass `--noproxy '*'` if you have one.
@@ -384,10 +384,14 @@ behind three backends, each declaring what it can actually guarantee.
 
 | Backend | Persistent | Shared | Used when |
 | --- | --- | --- | --- |
-| `fs` | yes | yes (single host) | local default |
+| `redis` | yes | yes | `REDIS_URL` (or `KV_URL`, `REDIS_TLS_URL`, `UPSTASH_REDIS_URL`) — **preferred** |
+| `upstash-rest` | yes | yes | `KV_REST_API_*` or `UPSTASH_REDIS_REST_*` |
 | `blob` | yes | yes | `BLOB_READ_WRITE_TOKEN`, or `BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN` |
-| `redis` | yes | yes | `KV_REST_API_*` or `UPSTASH_REDIS_REST_*` are set |
+| `fs` | yes | yes (single host) | local default |
 | `memory` | **no** | **no** | serverless with no store configured |
+
+Redis is selected first when configured, because the two properties the ledger depends on are native
+and atomic there rather than emulated.
 
 `shared` is the one that matters for correctness. Write-once anchoring must hold across concurrent
 instances, not merely within one process, and block numbers must equal log positions so two writers
@@ -395,13 +399,30 @@ cannot mint the same number. Each backend earns those two properties differently
 
 | | write-once (`setNX`) | append position |
 | --- | --- | --- |
-| `fs` | create-if-absent on the filesystem | serialised through an in-process queue |
+| `redis` | `SET key val NX` | `RPUSH` returns the new length |
+| `upstash-rest` | `SET .. NX` over REST | `RPUSH` over REST |
 | `blob` | `allowOverwrite: false` | ETag compare-and-swap, retried on conflict |
-| `redis` | `SET .. NX` | `RPUSH` returns the new length |
+| `fs` | create-if-absent on the filesystem | serialised through an in-process queue |
 | `memory` | map insert | array length |
 
-Redis is spoken over the Upstash REST API with plain `fetch`. Blob needs `@vercel/blob`, imported
-dynamically so the other three backends stay dependency-free.
+`redis` uses [node-redis](https://github.com/redis/node-redis) over TCP; `upstash-rest` uses the
+Upstash REST API with plain `fetch` and no dependency; `blob` needs `@vercel/blob`. All three are
+imported **dynamically**, so `fs` and `memory` still run with no `node_modules` at all.
+
+### Redis on serverless
+
+A TCP connection is per-instance, and the platform freezes instances between invocations, so a socket
+can be dead on resume. Handled by a lazily-created singleton that is never cached on failure, a
+bounded reconnect strategy so a wrong URL fails the request instead of hanging it, and node-redis's
+offline queue left on so commands wait for a reconnect rather than erroring.
+
+There is deliberately **no automatic command retry**. `RPUSH` is not idempotent: if it succeeded and
+only the reply was lost, retrying would append the same chain record twice. A duplicated ledger entry
+is worse than a surfaced error.
+
+Note that node-redis v6 negotiates **RESP3** — it opens with `HELLO 3` and sends `CLIENT SETINFO` and
+`CLIENT MAINT_NOTIFICATIONS`. Managed Redis proxies that reject unknown `CLIENT` subcommands can fail
+the handshake; if that happens, the REST backend is the fallback.
 
 ### Vercel Blob
 
@@ -452,15 +473,14 @@ shared between concurrent instances. `pc_attest` in one instance followed by `pc
 will report *no anchor for this proof ID*. Fine for a five-minute walkthrough in one warm instance,
 misleading for anything else.
 
-Either works, and the server picks it up with no code change:
+**Redis is the recommended store.** From the dashboard: **Storage → Marketplace → Redis → Connect**,
+then run `npm install`. Whichever variable your provider injects — `REDIS_URL`, `KV_URL`,
+`REDIS_TLS_URL` or `UPSTASH_REDIS_URL` — the server picks it up with no code change. Override with
+`PC_REDIS_URL` if you need to point somewhere else.
 
-- **Vercel Blob** — create a **private** store, then **Projects → Connect to Project**. Vercel injects
-  `BLOB_STORE_ID` and `VERCEL_OIDC_TOKEN`. Run `npm install` so `@vercel/blob` is present. See
-  [Vercel Blob](#vercel-blob) above for why private is mandatory.
-- **Upstash Redis** — **Storage → Marketplace → Upstash for Redis → Connect**, which injects
-  `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-
-If both are connected, Blob wins; set `PC_STORE=redis` to prefer Redis.
+Also supported, in this order of preference: the Upstash **REST** API (`KV_REST_API_*`, zero
+dependency), then **Vercel Blob** (`BLOB_*`, which must be a **private** store — see
+[Vercel Blob](#vercel-blob) for why). Force a specific backend with `PC_STORE=redis|upstash-rest|blob|fs|memory`.
 
 Verify the wiring before trusting it:
 
@@ -545,7 +565,9 @@ curl --noproxy '*' 'localhost:8787/detection?n=8&k=1&s=4&proofs=5'
 | `PC_PORT` | `8787` | Listen port |
 | `PC_HOST` | `127.0.0.1` | Bind address |
 | `PC_DATA` | `server/data` | Filesystem store location |
-| `PC_STORE` | auto | Force a backend: `fs`, `blob`, `redis` or `memory` |
+| `PC_STORE` | auto | Force a backend: `redis`, `upstash-rest`, `blob`, `fs` or `memory` |
+| `REDIS_URL` | — | Redis over TCP. `KV_URL`, `REDIS_TLS_URL`, `UPSTASH_REDIS_URL` also accepted |
+| `PC_REDIS_URL` | — | Overrides all of the above |
 | `PC_DEV` | — | `1` enables hot reload and `/dev/events`. Ignored on serverless. Same as `--dev` |
 | `BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN` | — | Vercel Blob via OIDC. Injected when you connect a store |
 | `BLOB_READ_WRITE_TOKEN` | — | Vercel Blob via static token, for running outside Vercel |
@@ -586,9 +608,15 @@ and nested structures — the console's independent-verification claim is worthl
 key and concurrent appends each getting a distinct position. Environment selection is pinned so
 serverless cannot silently fall back to a read-only filesystem, and a public Blob URL is refused.
 
-The Blob and Redis backends talk to a real service, so the unit tests cover only their selection and
-guard logic. `npm run check:store` exercises the full contract against whatever backend the
-environment selects — run it once after wiring a store up.
+**Redis over a real socket.** The suite stands up a minimal RESP3 server and drives the actual
+node-redis client through a real TCP connection — command names, `SET .. NX` returning `OK` or null,
+`RPUSH` returning the new length — then runs a full attest → receipts → verify round trip on it. It
+also asserts the store reaches for no command outside the seven it needs, so a managed Redis with a
+restricted command set will not surprise you in production.
+
+The Blob backend talks to a real service, so unit tests cover only its selection and guard logic.
+`npm run check:store` exercises the full contract against whatever backend the environment
+selects — run it once after wiring a store up.
 
 **Write-once anchoring.** A repeat `snapshot_hash` reverts, block numbers stay equal to log positions,
 and a full round trip runs on a non-filesystem store.

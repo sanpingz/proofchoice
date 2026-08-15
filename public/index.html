@@ -36,7 +36,11 @@
   --ink:#10151C; --ink2:#1A222C; --ink3:#28323E;
   --paper:#F7F8F6; --card:#FFFFFF;
   --wire:#D9DEDA; --wire2:#E9ECE9;
-  --slate:#5B6670; --slate2:#8A939B;
+  /* Contrast is measured, not eyeballed. --slate2 carries most of the
+     9.5-12px label type, so it has to clear 4.5:1 on white: #8A939B
+     was 3.12, #6E7780 is 4.55. --dim is the same job on the dark
+     strip and rail panels, where #54626F was 2.93 on --ink. */
+  --slate:#5B6670; --slate2:#6E7780; --dim:#798794;
   --seal:#1F4B3F; --seal-lite:#E4EDE7;
   --amber:#9A5B12; --amber-lite:#F6EDE0;
   --fault:#A8321E; --fault-lite:#F7E6E2;
@@ -77,19 +81,30 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 
 /* ---------- custody strip ---------- */
 .strip{background:var(--ink);padding:15px 22px 17px;overflow-x:auto}
-.strip-hd{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#6E7C8A;margin-bottom:11px}
-.custody{display:flex;align-items:stretch;gap:0;min-width:1000px}
-.seg{flex:1;position:relative;padding-right:16px}
+.strip-hd{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:11px}
+.custody{display:flex;align-items:stretch;gap:0;min-width:1080px}
+/* Each stage is a button: the strip is the organising element, so it
+   navigates to the role that owns that stage rather than only
+   reporting on it. */
+.seg{flex:1;position:relative;padding:0 16px 0 0;background:none;border:0;font:inherit;color:inherit;text-align:left;display:block}
 .seg:last-child{padding-right:0}
+.seg[data-goto]{cursor:pointer}
+.seg[data-goto]:hover .lb{color:#FFF}
+.seg[data-goto]:hover .bar{border-color:#7F8E9C}
+.seg:focus-visible{outline:2px solid #8FB8A6;outline-offset:3px;border-radius:2px}
+.seg > span{display:block}
 .seg .bar{height:5px;border-radius:1px;background:transparent;border:1px dashed #3B4854;transition:background .35s ease,border-color .35s ease}
 .seg.done .bar{background:var(--seal);border:1px solid var(--seal)}
 .seg.warn .bar{background:var(--amber);border:1px solid var(--amber)}
 .seg.bad  .bar{background:var(--fault);border:1px solid var(--fault)}
 .seg.info .bar{background:#5C7F99;border:1px solid #5C7F99}
-.seg .n{font-family:var(--mono);font-size:9.5px;color:#54626F;margin-top:9px;letter-spacing:.1em}
+.seg .n{font-family:var(--mono);font-size:9.5px;color:var(--dim);margin-top:9px;letter-spacing:.1em}
 .seg .lb{font-weight:600;font-size:12.5px;color:#8D9AA6;margin-top:2px;letter-spacing:-.01em}
 .seg.done .lb,.seg.warn .lb,.seg.bad .lb,.seg.info .lb{color:#F2F5F3}
-.seg .val{font-family:var(--mono);font-size:10px;color:#6E7C8A;margin-top:3px;word-break:break-all;min-height:14px}
+/* Wrap at spaces by default so "0 uncovered" cannot split mid-word;
+   only hashes get break-all. */
+.seg .val{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;min-height:14px;word-break:normal;overflow-wrap:break-word}
+.seg .val.hash{word-break:break-all}
 .seg.bad .val{color:#E9A092}
 .seg.bad::after{content:"BREAK";position:absolute;right:16px;top:-1px;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--fault)}
 
@@ -106,10 +121,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{ou
 
 .panel{margin:16px 12px 0;background:var(--ink);border-radius:var(--r);padding:13px}
 .panel h4{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:#8794A0;margin:0 0 3px}
-.panel p{font-size:11px;color:#7A8792;margin:0 0 10px;line-height:1.4}
+.panel p{font-size:11px;color:var(--dim);margin:0 0 10px;line-height:1.4}
 .panel label{display:block;font-size:11px;color:#C9D2D8;margin:9px 0 3px}
 .panel select{width:100%;background:var(--ink2);color:#EDF1F3;border:1px solid #2E3A47;border-radius:2px;padding:5px 6px;font-size:11.5px}
-.panel .hint{font-size:10.5px;color:#6E7C8A;margin-top:5px;line-height:1.4}
+.panel .hint{font-size:10.5px;color:var(--dim);margin-top:5px;line-height:1.4}
 .panel button{width:100%;margin-top:9px;background:var(--ink2);color:#EDF1F3;border:1px solid #2E3A47;border-radius:2px;padding:6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase}
 .panel button:hover:not(:disabled){border-color:#546374}
 .panel button:disabled{opacity:.45;cursor:not-allowed}
@@ -166,7 +181,16 @@ td.num{font-family:var(--mono)}
 .verdict .vd{font-size:12.5px;margin-top:4px;color:var(--ink3);max-width:68ch}
 .cov{display:flex;margin:12px 0 6px;border-radius:var(--r);overflow:hidden;height:26px;border:1px solid var(--wire)}
 .cov div{display:grid;place-items:center;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:#fff}
-.cov .c-a{background:var(--seal)} .cov .c-d{background:var(--fault)} .cov .c-u{background:#B6BEC4}
+.cov .c-a{background:var(--seal)} .cov .c-d{background:var(--fault)}
+/* Design.md is explicit: if the dashboard makes `uncovered` easy to
+   overlook, the mechanism has been defeated by its own UI. #B6BEC4
+   read as empty space and its label sat at 1.88:1 — illegible. The
+   hatch says "not filled in" rather than "fine", and both stripe
+   tones clear 4.5:1 against the white label. */
+.cov .c-u{background:repeating-linear-gradient(45deg,#646D77 0 5px,#6E7780 5px 10px)}
+.cov div{padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uncov-callout{display:flex;gap:8px;align-items:baseline;margin-top:8px;font-size:12.5px;color:var(--ink3)}
+.uncov-callout .dot{flex:none;width:11px;height:11px;border-radius:2px;background:repeating-linear-gradient(45deg,#646D77 0 3px,#6E7780 3px 6px)}
 .note{border-left:2px solid var(--wire);padding:2px 0 2px 12px;font-size:12px;color:var(--slate);margin-top:12px;max-width:66ch;line-height:1.5}
 .note.bad{border-left-color:var(--fault)}
 .empty{color:var(--slate2);font-size:12.5px;font-style:italic;padding:6px 0}
@@ -190,6 +214,26 @@ input[type=text]{width:100%;font-family:var(--mono);font-size:12.5px;padding:9px
 .derive .sv{font-family:var(--mono);font-size:11px;word-break:break-all;margin-top:3px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .spin{opacity:.5;pointer-events:none}
+
+/* Errors inline, in the page's own language. A native alert() breaks
+   the visual register and reads as a crash. */
+.errbar{display:flex;gap:11px;align-items:flex-start;background:var(--fault-lite);border:1px solid #E7C3BA;
+  border-radius:var(--r);padding:11px 13px;margin-bottom:14px;font-size:12.5px;color:#5F1B0E;max-width:68ch}
+.errbar b{display:block;margin-bottom:1px}
+.errbar .x{margin-left:auto;background:none;border:0;color:var(--fault);font-family:var(--mono);font-size:11px;padding:0 2px}
+
+/* A verdict computed before the switches changed is not wrong, it is
+   stale — and saying so beats silently discarding it. */
+.stalebar{background:var(--amber-lite);border:1px solid #E5D0B4;border-radius:var(--r);
+  padding:10px 13px;margin-bottom:12px;font-size:12.5px;color:#5C3A0B;max-width:68ch}
+.verdict.stale,.checks.stale{opacity:.45;filter:grayscale(.5)}
+
+/* Canonical byte string ↔ field cross-highlighting. */
+.cbytes span{border-radius:2px;padding:1px 0}
+.cbytes span.hl{background:#24503F;box-shadow:0 0 0 1px #6FBF9A}
+tr.frow{cursor:default}
+tr.frow.hl td{background:var(--seal-lite)}
+tr.frow td.fk{font-family:var(--mono);font-size:11px}
 @media(max-width:920px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--wire)}.grid2{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.seg .bar{transition:none}}
 </style>
@@ -273,6 +317,42 @@ function pretty(o){
     .replace(/: (\d+|true|false|null)/g,': <span class="n">$1</span>');
 }
 
+/* ============================================================
+   Canonical byte spans
+   ------------------------------------------------------------
+   Rebuilds the canonical string the same way canon() does, while
+   recording where each top-level field's bytes start and end. That
+   turns "this is what gets hashed" from a wall of monospace into
+   something you can point at: hover a field, see its bytes.
+
+   The reconstruction is asserted against canon() at render time — if
+   the two ever disagreed, the highlighting would be a lie about the
+   very thing this view exists to show.
+   ============================================================ */
+function canonSegments(o){
+  const keys = Object.keys(o).sort();
+  const segs = [];
+  let s = '{', off = 1;
+  keys.forEach((k, i) => {
+    const text = JSON.stringify(k) + ':' + canon(o[k]);
+    segs.push({ key:k, text, start:off, end:off + text.length, bytes:text.length });
+    s += text; off += text.length;
+    if (i < keys.length - 1) { s += ','; off += 1; }
+  });
+  return { canonical: s + '}', segs };
+}
+
+/** Wrap each field's bytes in a span, escaping everything else. */
+function canonHtml(canonical, segs){
+  let out = '', pos = 0;
+  for(const sg of segs){
+    out += esc(canonical.slice(pos, sg.start));
+    out += `<span data-f="${esc(sg.key)}">${esc(sg.text)}</span>`;
+    pos = sg.end;
+  }
+  return out + esc(canonical.slice(pos));
+}
+
 /* ---------- api ---------- */
 const api = {
   async get(p){ const r = await fetch(p); const j = await r.json().catch(()=>({})); return {ok:r.ok, status:r.status, body:j}; },
@@ -287,7 +367,24 @@ let S = {
   declared:new Set(), proof:null, receipts:null, coverage:null,
   audit:null, evidence:null, recomputed:null,
   model:'hybrid', routing:'relayer', busy:false,
+  error:null,        // inline, never alert()
+  auditStale:false,  // switches changed since the verdict was computed
 };
+
+const setError = (title, detail) => { S.error = {title, detail}; };
+const clearError = () => { S.error = null; };
+
+/** A verdict computed before the adversary switches changed is not
+ *  wrong, it is stale. Saying so is better than silently discarding
+ *  it — and far better than leaving it on screen as if it still held. */
+function markStale(){ if(S.audit) S.auditStale = true; }
+
+function errorBlock(){
+  if(!S.error) return '';
+  return `<div class="errbar" role="alert">
+    <div><b>${esc(S.error.title)}</b>${S.error.detail?esc(S.error.detail):''}</div>
+    <button class="x" id="errX" aria-label="Dismiss">dismiss</button></div>`;
+}
 
 const ROLES = [
   {id:'buyer',    name:'Buyer',             lim:'Cannot see the candidate pool. Holds only a proof ID.'},
@@ -314,23 +411,31 @@ function stripModel(){
                  : a.checks?.[2]?.state === 'bad' ? 'bad'
                  : a.checks?.[2]?.state === 'warn' ? 'warn' : 'done';
   return [
-    {n:'01', lb:'Query',     st:p?'done':'',  v:p?short(p.snapshot.query_hash)+'…':'awaiting request'},
-    {n:'02', lb:'Snapshot',  st:hashSt,       v:p?short(p.snapshot_hash)+'…':'not built'},
-    {n:'03', lb:'Signature', st:!p?'':(a&&a.checks?.[3]?.state==='warn'?'warn':'done'),
+    {n:'01', lb:'Query',     st:p?'done':'',  go:'buyer',    hash:!!p,
+             v:p?short(p.snapshot.query_hash)+'…':'awaiting request'},
+    {n:'02', lb:'Snapshot',  st:hashSt,       go:'agent',    hash:!!p,
+             v:p?short(p.snapshot_hash)+'…':'not built'},
+    {n:'03', lb:'Signature', st:!p?'':(a&&a.checks?.[3]?.state==='warn'?'warn':'done'), go:'agent', hash:!!p,
              v:p?short(p.anchor.platform_signature)+'…':'unsigned'},
-    {n:'04', lb:'Anchor',    st:p?'done':'',  v:p?`block ${p.anchor.block}`:'not anchored'},
-    {n:'05', lb:'Custody',   st:custodySt,
+    {n:'04', lb:'Anchor',    st:p?'done':'',  go:'chain',
+             v:p?`block ${p.anchor.block}`:'not anchored'},
+    {n:'05', lb:'Custody',   st:custodySt,    go:'auditor',
              v:p?(cs?cs.toLowerCase():`${p.custody.model} · ${p.custody.holders.length} holders`):'not distributed'},
-    {n:'06', lb:'Receipts',  st:!cov?'':(cov.deny?'bad':cov.uncovered?'warn':'done'),
+    {n:'06', lb:'Receipts',  st:!cov?'':(cov.deny?'bad':cov.uncovered?'warn':'done'), go:'supplier',
              v:cov?`${cov.affirm} affirm · ${cov.deny} deny · ${cov.uncovered} uncovered`:'not requested'},
     {n:'07', lb:'Verdict',   st:!a?'':a.verdict==='pass'?'done':a.verdict==='partial'?'warn':a.verdict==='inconclusive'?'info':'bad',
+             go:'auditor',
              v:a?a.verdict.toUpperCase():'not audited'},
   ];
 }
 function renderStrip(){
   document.getElementById('custody').innerHTML = stripModel().map(s=>`
-    <div class="seg ${s.st}"><div class="bar"></div><div class="n">${s.n}</div>
-    <div class="lb">${s.lb}</div><div class="val">${esc(s.v)}</div></div>`).join('');
+    <button type="button" class="seg ${s.st}" data-goto="${s.go}"
+            aria-label="Stage ${s.n}, ${s.lb}: ${esc(s.v)}">
+      <span class="bar"></span><span class="n">${s.n}</span>
+      <span class="lb">${s.lb}</span>
+      <span class="val ${s.hash?'hash':''}">${esc(s.v)}</span>
+    </button>`).join('');
 }
 
 /* ============================================================
@@ -423,6 +528,7 @@ V.schema = () => {
   if(!p) return emptyView('Schema inspector','Commit a proof first — there is nothing to hash yet.');
   const bytes = p.canonical_bytes;
   const diff = S.byteDiff;
+  const seg = canonSegments(p.snapshot);
   return `
   <div class="eyebrow">Role 03 · Schema inspector</div>
   <h1>What exactly gets hashed</h1>
@@ -435,12 +541,21 @@ V.schema = () => {
 
   <div class="card">
     <div class="klabel">2 · canonical byte string — recursively key-sorted, no whitespace. THIS is hashed.</div>
-    <pre class="blob" style="color:#E8EEF2">${esc(p.canonical)}</pre>
+    <pre class="blob cbytes" style="color:#E8EEF2">${canonHtml(seg.canonical, seg.segs)}</pre>
     <div class="actrow" style="margin-top:10px">
+      <span class="tag ${seg.canonical===p.canonical?'t-ok':'t-bad'}">${seg.canonical===p.canonical?'reconstructed byte-for-byte in this browser':'MISMATCH vs server'}</span>
       <span class="tag t-idle">${bytes} bytes</span>
       <button class="act ghost" id="copyCanon">Copy</button>
     </div>
-    <div class="note">Note the key order: the object above is written in schema order, this string is sorted. Two servers that disagree about ordering produce two different hashes for identical data, so the ordering rule is part of the contract, not a style choice.</div>
+    <div class="note">Hover a field to see exactly which bytes it occupies. Note the key order: the object above is written in schema order, this string is sorted. Two servers that disagree about ordering produce two different hashes for identical data, so the ordering rule is part of the contract, not a style choice.</div>
+    <table style="margin-top:14px"><thead><tr><th>Field</th><th>Bytes</th><th>Offset</th><th>Share of input</th></tr></thead><tbody>
+      ${seg.segs.map(s=>`<tr class="frow" data-f="${esc(s.key)}">
+        <td class="fk">${esc(s.key)}</td>
+        <td class="num">${s.bytes}</td>
+        <td class="num" style="color:var(--slate)">${s.start}–${s.end}</td>
+        <td class="num" style="color:var(--slate)">${(s.bytes/seg.canonical.length*100).toFixed(1)}%</td>
+      </tr>`).join('')}
+    </tbody></table>
   </div>
 
   <div class="card">
@@ -541,6 +656,9 @@ V.supplier = () => {
       ${c.deny?`<div class="c-d" style="flex:${c.deny}">${c.deny} deny</div>`:''}
       ${c.uncovered?`<div class="c-u" style="flex:${c.uncovered}">${c.uncovered} uncovered</div>`:''}
     </div>
+    ${c.uncovered?`<div class="uncov-callout"><span class="dot"></span>
+      <span><b>${c.uncovered} of ${c.total} registry suppliers returned no receipt.</b>
+      That is not agreement and it is not a denial — it is an unanswered question, and it stays counted as one.</span></div>`:''}
     <div class="note">A missing receipt is recorded as <b>uncovered</b>, never folded into agreement — the difference between “nobody objected” and “nobody was asked” is the entire mechanism.${
       S.routing==='legacy'?` Under legacy routing the denials were signed and then dropped in transit, so coverage reads clean while the pruning stays invisible.`:''}</div>
   </div>`:''}`;
@@ -561,8 +679,9 @@ V.auditor = () => {
   </div>
 
   ${a?`
+  ${S.auditStale?`<div class="stalebar"><b>This verdict is out of date.</b> A switch changed after it was computed, so it describes the previous state. Re-run verification.</div>`:''}
   ${verdictBlock(a,false)}
-  <div class="card">
+  <div class="card checks ${S.auditStale?'stale':''}">
     ${a.checks.map((c,i)=>`<div class="check">
       <div class="ic ${c.state}">${icon[c.state]}</div>
       <div><div class="ct">${i+1}. ${esc(c.title)}</div><div class="cd">${esc(c.detail)}</div></div>
@@ -613,13 +732,14 @@ V.chain = () => {
 function emptyView(t,m){ return `<div class="eyebrow">ProofChoice</div><h1>${esc(t)}</h1><p class="lede">${esc(m)}</p>`; }
 
 function verdictBlock(a, buyerVoice){
+  const stale = S.auditStale ? ' stale' : '';
   const T = {
     pass:         buyerVoice?'This answer holds up':'Verified',
     partial:      buyerVoice?'Partly verifiable':'Verified with gaps',
     inconclusive: buyerVoice?'No longer checkable':'Inconclusive — evidence expired',
     fail:         buyerVoice?'This answer does not hold up':'Verification failed',
   };
-  return `<div class="verdict ${a.verdict}">
+  return `<div class="verdict ${a.verdict}${stale}" role="status" aria-live="polite">
     <div class="vt">${T[a.verdict]}</div><div class="vd">${esc(a.summary)}</div></div>`;
 }
 
@@ -752,7 +872,8 @@ const ACTIONS = {
       winner_id: w.id,
       custody_model: S.model,
     });
-    if(!r.ok) return alert(r.body.error ?? 'attest failed');
+    if(!r.ok) return setError('Could not commit the snapshot.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
+    clearError();
     S.proof = r.body;
     await refreshEvidence();
     S.role = 'schema';
@@ -760,27 +881,32 @@ const ACTIONS = {
 
   async goReceipts(){
     const r = await api.post('/receipts', {proof_id:S.proof.proof_id, routing:S.routing});
-    if(!r.ok) return alert(r.body.error ?? 'receipts failed');
+    if(!r.ok) return setError('Could not collect receipts.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
+    clearError();
     S.receipts = r.body.receipts; S.coverage = r.body.coverage;
     S.role = 'auditor';
   },
 
   async goVerify(){
     const r = await api.get('/verify/'+S.proof.proof_id);
-    if(!r.ok) return alert(r.body.error ?? 'verify failed');
+    if(!r.ok) return setError('Verification could not run.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
+    clearError();
     S.audit = r.body;
+    S.auditStale = false;
     await refreshEvidence();
   },
 
   async btnTamper(){
     await api.post('/custody-control', {holder:'platform', tamper_proof_id:S.proof.proof_id});
     await refreshEvidence();
-    S.audit = null;
+    markStale();
   },
 
   async btnReset(){
     await api.post('/reset');
-    S.audit = null;
+    S.holderMode = {platform:'serve',buyer:'serve',neutral:'serve'};
+    markStale();
+    clearError();
     await loadChain();
     await refreshEvidence();
     document.getElementById('selClock').value = '0';
@@ -804,7 +930,7 @@ const MODES = ['serve','withhold','lost','unresponsive'];
 
 function renderRail(){
   document.getElementById('roles').innerHTML = ROLES.map(r=>`
-    <button class="role ${S.role===r.id?'on':''}" data-role="${r.id}">
+    <button class="role ${S.role===r.id?'on':''}" data-role="${r.id}" ${S.role===r.id?'aria-current="page"':''}>
       <div class="rname">${esc(r.name)}</div><div class="rlim">${esc(r.lim)}</div></button>`).join('');
 
   const sel = document.getElementById('selModel');
@@ -850,28 +976,48 @@ function render(){
   renderDisclosure();
   renderRail();
   renderStrip();
-  document.getElementById('stage').innerHTML = (V[S.role] ?? V.buyer)();
+  document.getElementById('stage').innerHTML = errorBlock() + (V[S.role] ?? V.buyer)();
+
+  /* Announce the view change and put focus somewhere sensible, rather
+     than swapping the whole stage out in silence. */
+  const h1 = document.querySelector('#stage h1');
+  if(h1){ h1.setAttribute('tabindex','-1'); if(S.focusStage){ h1.focus(); S.focusStage = false; } }
+
+  /* Hovering a field highlights its bytes, and vice versa. */
+  const mark = (key, on) => document.querySelectorAll(`[data-f="${CSS.escape(key)}"]`)
+    .forEach(el => el.classList.toggle('hl', on));
+  document.querySelectorAll('[data-f]').forEach(el=>{
+    const k = el.dataset.f;
+    el.addEventListener('mouseenter', ()=>mark(k,true));
+    el.addEventListener('mouseleave', ()=>mark(k,false));
+  });
 
   document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>{
-    S.role=b.dataset.role;
+    S.role=b.dataset.role; S.focusStage = true;
     if(S.role==='chain') loadChain().then(render); else render();
   });
   document.querySelectorAll('[data-cand]').forEach(b=>b.onchange=()=>{
     b.checked ? S.declared.add(b.dataset.cand) : S.declared.delete(b.dataset.cand);
     render();
   });
+  document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{
+    S.role = b.dataset.goto;
+    if(S.role==='chain') loadChain().then(render); else render();
+  });
   document.querySelectorAll('[data-holder]').forEach(sel=>sel.onchange=async()=>{
     S.holderMode = {...(S.holderMode??{}), [sel.dataset.holder]: sel.value};
     await api.post('/custody-control',{holder:sel.dataset.holder, mode:sel.value});
-    S.audit = null; await refreshEvidence(); render();
+    markStale(); await refreshEvidence(); render();
   });
+  const ex = document.getElementById('errX');
+  if(ex) ex.onclick = () => { clearError(); render(); };
 
   const sm = document.getElementById('selModel');
   sm.onchange = () => { S.model = sm.value; render(); };
   const sc = document.getElementById('selClock');
   sc.onchange = async () => {
     await api.post('/custody-control',{advance_months:Number(sc.value)});
-    S.audit = null; await refreshEvidence(); render();
+    markStale(); await refreshEvidence(); render();
   };
   const sr = document.getElementById('selRouting');
   if(sr) sr.onchange = () => { S.routing = sr.value; render(); };
@@ -882,7 +1028,7 @@ function render(){
     el.onclick = async () => {
       el.disabled = true;
       document.getElementById('stage').classList.add('spin');
-      try { await fn(); } catch(e){ alert(e.message); }
+      try { await fn(); } catch(e){ setError('Something went wrong.', ' ' + e.message); }
       document.getElementById('stage').classList.remove('spin');
       render();
     };

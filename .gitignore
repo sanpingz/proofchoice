@@ -145,3 +145,4 @@ vite.config.ts.timestamp-*
 # ProofChoice server state — chain, keys, custody blobs
 server/data/
 .DS_Store
+.vercel
