@@ -509,6 +509,18 @@ async function storage() {
     if (s.kind === 'fs') await rm(s.dir, { recursive: true, force: true });
   }
 
+  for (const make of [() => new MemoryStore(), () => new FsStore(null)]) {
+    const s2 = make();
+    if (s2.kind === 'fs') s2.dir = await mkdtemp(join(tmpdir(), 'proofchoice-clear-'));
+    await s2.set('a', '1'); await s2.append('l', 'x');
+    await s2.clear();
+    eq(await s2.get('a'), null, `${s2.kind}: clear() removes keys`);
+    eq(await s2.list('l'), [], `${s2.kind}: clear() removes logs`);
+    await s2.set('b', '2');
+    eq(await s2.get('b'), '2', `${s2.kind}: still usable after clear()`);
+    if (s2.kind === 'fs') await rm(s2.dir, { recursive: true, force: true });
+  }
+
   eq(new MemoryStore().persistent, false, 'memory store declares itself non-persistent');
   eq(new MemoryStore().shared, false, '   … and non-shared, so it cannot back a history claim');
 
@@ -787,7 +799,19 @@ async function fakeRedis() {
       }
       case 'GET': return bulk(KV.has(key) ? KV.get(key) : null);
       case 'EXISTS': return `:${KV.has(key) ? 1 : 0}\r\n`;
-      case 'DEL': { const had = KV.delete(key) ? 1 : 0; LISTS.delete(key); return `:${had}\r\n`; }
+      case 'DEL': {
+        let n = 0;
+        for (const k of args.slice(1)) { if (KV.delete(k)) n++; if (LISTS.delete(k)) n++; }
+        return `:${n}\r\n`;
+      }
+      case 'SCAN': {
+        /* One page, cursor back to 0. Enough to drive scanIterator. */
+        const mi = args.findIndex(a => String(a).toUpperCase() === 'MATCH');
+        const pat = mi > 0 ? String(args[mi + 1]) : '*';
+        const rx = new RegExp('^' + pat.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*') + '$');
+        const all = [...new Set([...KV.keys(), ...LISTS.keys()])].filter(k => rx.test(k));
+        return `*2\r\n${bulk('0')}*${all.length}\r\n` + all.map(bulk).join('');
+      }
       case 'RPUSH': {
         const l = LISTS.get(key) ?? []; l.push(...args.slice(2));
         LISTS.set(key, l); return `:${l.length}\r\n`;
@@ -842,9 +866,24 @@ async function redisStore() {
     await store.del('a');
     eq(await store.has('a'), false, 'del()');
 
+    /* clear() must be prefix-scoped: the database may not be ours. */
+    await store.set('keep', 'x');
+    await store.append('keeplog', 'y');
+    const other = new RedisClientStore({ url: `redis://127.0.0.1:${fake.port}`, prefix: 'someone-else:' });
+    await other.set('theirs', 'do not touch');
+    const removed = await store.clear();
+    eq(removed > 0, true, `clear() removed ${removed} of our keys`);
+    eq(await store.get('keep'), null, '   … our keys are gone');
+    eq(await store.list('keeplog'), [], '   … including our logs');
+    eq(await other.get('theirs'), 'do not touch', '   … and a different prefix is untouched');
+    await other.close();
+
     /* Guard against the store quietly depending on a command the
      * deployment's Redis might not allow. */
-    const allowed = new Set(['PING','HELLO','CLIENT','INFO','COMMAND','SET','GET','EXISTS','DEL','RPUSH','LRANGE']);
+    /* SCAN is here because clear() needs it — prefix-scoped deletion
+     * rather than FLUSHDB. Anything NOT on this list appearing here is
+     * a new dependency a restricted managed Redis might refuse. */
+    const allowed = new Set(['PING','HELLO','CLIENT','INFO','COMMAND','SET','GET','EXISTS','DEL','RPUSH','LRANGE','SCAN']);
     const extra = [...fake.seen].filter(c => !allowed.has(c));
     eq(extra, [], 'uses no commands outside the expected set');
 

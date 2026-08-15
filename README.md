@@ -533,6 +533,21 @@ Check three fields: `store.persistent` is `true`, `key_source` is `env`, and the
 any is wrong the deployment will still answer requests — it just cannot back the claims it appears to
 be making.
 
+### Erasing the store
+
+The console's **Reset storage** button, and `POST /reset-storage`, erase the ledger, the custody
+blobs and every proof, then re-register the platform key. Every previously issued proof ID stops
+verifying.
+
+That is not a hole in the design — it is the design being honest. The trust disclosure says a
+single-operator store does not resist its operator, and this is what that means in practice. The
+button takes two deliberate clicks and names what it destroys.
+
+Deletion is **prefix-scoped**: it removes only this project's keys, never `FLUSHDB`, so a Redis
+instance shared with anything else survives. Set `PC_RESET_TOKEN` to require `?token=…` — worth
+doing on any deployment, since there is no authentication and anyone with the URL could otherwise
+erase the record.
+
 ### Security
 
 **There is no authentication.** Anyone who finds the URL can write to the chain, flip the adversary
@@ -567,7 +582,8 @@ curl --noproxy '*' -X POST localhost:8787/custody-control -H 'content-type: appl
   -d '{"holder":"platform","mode":"withhold"}'
 curl --noproxy '*' -X POST localhost:8787/custody-control -H 'content-type: application/json' \
   -d '{"holder":"platform","tamper_proof_id":"PC-XXXXXXXXXX"}'
-curl --noproxy '*' -X POST localhost:8787/reset
+curl --noproxy '*' -X POST localhost:8787/reset            # switches only, ledger untouched
+curl --noproxy '*' -X POST localhost:8787/reset-storage    # ERASES the ledger — see below
 
 curl --noproxy '*' 'localhost:8787/detection?n=8&k=1&s=4&proofs=5'
 ```
@@ -594,6 +610,7 @@ curl --noproxy '*' 'localhost:8787/detection?n=8&k=1&s=4&proofs=5'
 | `PC_OPERATOR` | Doubao Travel Procurement Agent | Operator name bound to the platform key |
 | `PC_FORCE_SSE` | — | `1` forces `text/event-stream` responses |
 | `PC_ALLOWED_ORIGINS` | — | Comma-separated extra allowed origins |
+| `PC_RESET_TOKEN` | — | If set, `/reset-storage` requires `?token=…`. Worth setting on any deployment |
 
 `server/data/` is gitignored and excluded from deployments. Delete it to start from a fresh log and
 fresh keys.

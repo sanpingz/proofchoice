@@ -139,11 +139,11 @@ async function loadKeys(store) {
   if (process.env.PC_KEYS) {
     const raw = process.env.PC_KEYS.trim();
     const text = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
-    return { keys: await materialise(JSON.parse(text)), source: 'env' };
+    return { keys: await materialise(JSON.parse(text)), source: 'env', serialised: JSON.parse(text) };
   }
 
   const existing = await store.get('keys');
-  if (existing) return { keys: await materialise(JSON.parse(existing)), source: store.kind };
+  if (existing) return { keys: await materialise(JSON.parse(existing)), source: store.kind, serialised: JSON.parse(existing) };
 
   const { keys, serialised } = await generateKeySet();
   const won = await store.setNX('keys', JSON.stringify(serialised));
@@ -151,9 +151,9 @@ async function loadKeys(store) {
     /* Another instance generated first — adopt theirs, so every
      * instance signs with the same identity. */
     const theirs = await store.get('keys');
-    if (theirs) return { keys: await materialise(JSON.parse(theirs)), source: store.kind };
+    if (theirs) return { keys: await materialise(JSON.parse(theirs)), source: store.kind, serialised: JSON.parse(theirs) };
   }
-  return { keys, source: store.persistent ? store.kind : 'ephemeral' };
+  return { keys, source: store.persistent ? store.kind : 'ephemeral', serialised };
 }
 
 /* ============================================================
@@ -162,26 +162,30 @@ async function loadKeys(store) {
 
 export async function boot({ dataDir = DATA, store, custodyModel, keyRegistryEnabled } = {}) {
   const st = store ?? storeFromEnv({ dataDir });
-  const { keys, source: keySource } = await loadKeys(st);
+  const { keys, source: keySource, serialised: keysSerialised } = await loadKeys(st);
 
   const chain = await new Chain(st).load();
   const custody = new Custody(st, keys.holders);
 
   /* Genesis: bind the platform key to a named operator on chain.
-   * Without this, a valid signature is still repudiable. */
-  if (!chain.getKey(keys.platform.key_id)) {
-    await chain.registerKey({
-      key_id: keys.platform.key_id,
-      pub_raw: keys.platform.pub_raw,
-      operator: process.env.PC_OPERATOR ?? 'Doubao Travel Procurement Agent',
-    });
-  }
+   * Without this, a valid signature is still repudiable. Factored out
+   * because it has to run again after the store is erased. */
+  const genesis = async () => {
+    if (!chain.getKey(keys.platform.key_id)) {
+      await chain.registerKey({
+        key_id: keys.platform.key_id,
+        pub_raw: keys.platform.pub_raw,
+        operator: process.env.PC_OPERATOR ?? 'Doubao Travel Procurement Agent',
+      });
+    }
+  };
+  await genesis();
 
   const supplierPubs = {};
   for (const [id, k] of Object.entries(keys.suppliers)) supplierPubs[id] = k.pub_raw;
 
   const ctx = {
-    store: st, chain, custody, keys, keySource,
+    store: st, chain, custody, keys, keySource, keysSerialised, genesis,
     platform: new Platform({ chain, custody, key: keys.platform }),
     relayer: new Relayer(keys.suppliers),
     supplierPubs,
@@ -461,6 +465,45 @@ export function createHandler(ctx) {
       if (path === '/reset' && req.method === 'POST') {
         ctx.custody.reset();
         return json(res, 200, { mode: ctx.custody.mode, note: 'Adversary switches cleared. The append-only log is unchanged — that is the point of an append-only log.' });
+      }
+
+      /* Erase the store. This is the operator deleting the ledger,
+       * which the trust disclosure explicitly says a single-operator
+       * store cannot resist — so it is offered plainly rather than
+       * dressed up as a "reset", and it says what it destroyed.
+       *
+       * Prefix-scoped: it never flushes a database that may hold
+       * other data. Set PC_RESET_TOKEN to require ?token= — worth
+       * doing on any deployment, since there is no authentication and
+       * anyone with the URL can otherwise erase the record. */
+      if (path === '/reset-storage' && req.method === 'POST') {
+        const need = process.env.PC_RESET_TOKEN;
+        if (need && url.searchParams.get('token') !== need) {
+          return json(res, 403, { error: 'reset token required', hint: 'PC_RESET_TOKEN is set; pass ?token=…' });
+        }
+        const before = ctx.chain.blocks.length;
+        const anchors = ctx.chain.blocks.filter(b => b.type === 'anchor').length;
+
+        await ctx.store.clear();
+        /* Re-seed the key set so other instances converge on the same
+         * signing identity instead of each minting a new one. */
+        if (ctx.keySource !== 'env' && ctx.keysSerialised) {
+          await ctx.store.setNX('keys', JSON.stringify(ctx.keysSerialised));
+        }
+        await ctx.chain.load();     // now empty
+        await ctx.genesis();        // re-register the platform key
+        ctx.custody.reset();
+
+        return json(res, 200, {
+          erased: true,
+          store: ctx.store.kind,
+          blocks_erased: before,
+          anchors_erased: anchors,
+          blocks_now: ctx.chain.blocks.length,
+          note: 'Ledger, custody blobs and per-proof state erased; the platform key was re-registered. ' +
+                'Every previously issued proof ID is now unverifiable — which is precisely what the ' +
+                'trust disclosure means when it says a single-operator store does not resist its operator.',
+        });
       }
 
       if (path === '/detection') {

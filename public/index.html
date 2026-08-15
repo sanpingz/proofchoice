@@ -150,6 +150,11 @@ button.pchip:hover{border-color:#54626F;color:#DCE4EA}
 .simlabel{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:#9A5B12;background:#3A2C13;border-radius:2px;padding:2px 5px;display:inline-block;margin-bottom:7px}
 .reset{width:calc(100% - 24px);margin:14px 12px 0;background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:8px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)}
 .reset:hover{border-color:var(--slate2);color:var(--ink)}
+/* Armed state. Erasing the ledger is irreversible, so it takes two
+   deliberate clicks rather than one stray one. */
+.reset.arm{border-color:#E7C3BA;background:var(--fault-lite);color:var(--fault)}
+.reset.arm:hover{border-color:var(--fault)}
+.resetnote{margin:6px 12px 0;font-size:10.5px;color:var(--slate);line-height:1.4}
 
 /* ---------- stage ---------- */
 .stage{padding:24px 28px 60px;max-width:1040px}
@@ -306,7 +311,7 @@ tr.frow td.fk{font-family:var(--mono);font-size:11px}
       <button id="btnTamper" disabled>Edit platform’s stored copy</button>
     </div>
 
-    <button class="reset" id="btnReset">Reset switches</button>
+    <div id="resetBox"></div>
   </nav>
 
   <main class="stage" id="stage"></main>
@@ -1087,15 +1092,25 @@ const ACTIONS = {
     markStale();
   },
 
-  async btnReset(){
-    await api.post('/reset');
+  btnReset(){ S.resetArmed = true; },
+  btnResetCancel(){ S.resetArmed = false; },
+
+  /** Erase the store, then rebuild local state from what remains. */
+  async btnResetGo(){
+    const r = await api.post('/reset-storage');
+    if(!r.ok){
+      S.resetArmed = false;
+      return setError('Could not erase storage.', ' ' + (r.body?.error ?? `HTTP ${r.status}`));
+    }
+    S.proofs = []; S.selected = null; S.composing = true;
+    S.resetArmed = false;
     S.holderMode = {platform:'serve',buyer:'serve',neutral:'serve'};
-    markStale();
+    S.draft = { query: S.draft.query, declared: new Set(S.registry.map(c=>c.id)) };
+    await updateDraftHash();
     clearError();
     await loadChain();
-    await refreshEvidence(cur());
-    document.getElementById('selClock').value = '0';
-    render();
+    const el = document.getElementById('selClock'); if(el) el.value = '0';
+    S.role = 'requester';
   },
 
   copyCanon(){ navigator.clipboard?.writeText(cur()?.canonical ?? ''); },
@@ -1188,6 +1203,17 @@ function renderRail(){
     </select>`).join('');
 
   document.getElementById('btnTamper').disabled = !cur();
+
+  const rb = document.getElementById('resetBox');
+  if(rb){
+    rb.innerHTML = S.resetArmed
+      ? `<button class="reset arm" id="btnResetGo">Erase — confirm</button>
+         <button class="reset" id="btnResetCancel">Cancel</button>
+         <div class="resetnote">Erases the ledger, the custody blobs and every proof from
+           <b>${esc(S.health?.store?.kind ?? 'the store')}</b>. Existing proof IDs stop verifying.
+           This is the operator deleting the record — the one thing a single-operator store cannot resist.</div>`
+      : `<button class="reset" id="btnReset">Reset storage</button>`;
+  }
 }
 
 /* Display names for wire values. The identifiers `buyer` and

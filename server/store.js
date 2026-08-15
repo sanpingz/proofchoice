@@ -97,6 +97,13 @@ export class FsStore {
     if (!existsSync(p)) return [];
     return (await readFile(p, 'utf8')).split('\n').filter(l => l.trim());
   }
+
+  /** Erase everything. This is the operator deleting the store — the
+   *  one thing the trust disclosure says a single-operator ledger
+   *  cannot resist. It is a demo convenience, not a protocol feature. */
+  async clear() {
+    if (existsSync(this.dir)) await rm(this.dir, { recursive: true, force: true });
+  }
 }
 
 /* ------------------------------------------------------------
@@ -148,6 +155,18 @@ export class RedisStore {
   async list(key) { return (await this._cmd('LRANGE', this._k(key + ':log'), 0, -1)) ?? []; }
 
   async ping() { await this._cmd('PING'); return true; }
+
+  /** Prefix-scoped delete, for the same reason as the TCP client:
+   *  the database may not be ours alone. */
+  async clear() {
+    let cursor = '0', n = 0;
+    do {
+      const [next, keys] = await this._cmd('SCAN', cursor, 'MATCH', this.prefix + '*', 'COUNT', 500);
+      if (keys?.length) { await this._cmd('DEL', ...keys); n += keys.length; }
+      cursor = String(next);
+    } while (cursor !== '0');
+    return n;
+  }
 }
 
 /* ------------------------------------------------------------
@@ -231,6 +250,19 @@ export class RedisClientStore {
   async list(key) { return (await (await this.client()).lRange(this._k(key + ':log'), 0, -1)) ?? []; }
 
   async ping() { await (await this.client()).ping(); return true; }
+
+  /** Delete only OUR keys. Never FLUSHDB: the database may be shared
+   *  with something else entirely, and wiping a neighbour's data to
+   *  reset a demo would be indefensible. */
+  async clear() {
+    const c = await this.client();
+    let n = 0;
+    for await (const keys of c.scanIterator({ MATCH: this.prefix + '*', COUNT: 500 })) {
+      const batch = Array.isArray(keys) ? keys : [keys];
+      if (batch.length) { await c.del(batch); n += batch.length; }
+    }
+    return n;
+  }
 
   async close() {
     if (!this._p) return;
@@ -386,6 +418,20 @@ export class BlobStore {
     const cur = await this._read(this._log(key));
     return cur ? cur.text.split('\n').filter(l => l.trim()) : [];
   }
+
+  /** Prefix-scoped, so a store shared with other content survives. */
+  async clear() {
+    const { list, del } = await this.sdk();
+    const opts = this.token ? { token: this.token } : {};
+    let cursor, n = 0;
+    do {
+      const r = await list({ ...opts, prefix: this.prefix, cursor, limit: 1000 });
+      const urls = (r.blobs ?? []).map(x => x.url);
+      if (urls.length) { await del(urls, opts); n += urls.length; }
+      cursor = r.hasMore ? r.cursor : undefined;
+    } while (cursor);
+    return n;
+  }
 }
 
 /* ------------------------------------------------------------
@@ -412,6 +458,7 @@ export class MemoryStore {
     return this.logs.get(key).push(line);
   }
   async list(key) { return this.logs.get(key) ?? []; }
+  async clear() { const n = this.map.size + this.logs.size; this.map.clear(); this.logs.clear(); return n; }
 }
 
 /* ------------------------------------------------------------
