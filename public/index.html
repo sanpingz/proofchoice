@@ -401,7 +401,7 @@ const QUERY = 'Annual room-block framework · Hong Kong · 4-star+ · 120 room-n
    query gets its own chain of custody" means.
    ------------------------------------------------------------ */
 let S = {
-  role:'buyer', health:null, registry:[],
+  role:'requester', health:null, registry:[],
   proofs:[],            // oldest first; each one its own chain of custody
   selected:null,        // proof_id currently shown
   composing:true,       // a draft query is being prepared
@@ -439,7 +439,7 @@ function errorBlock(){
 }
 
 const ROLES = [
-  {id:'buyer',    name:'Buyer',             lim:'Cannot see the candidate pool. Holds only a proof ID.'},
+  {id:'requester', name:'Requester',        lim:'Initiates the query. Receives one answer and one proof ID.'},
   {id:'agent',    name:'AI agent platform', lim:'Cannot alter an anchor once written, or suppress a relayed receipt.'},
   {id:'schema',   name:'Schema inspector',  lim:'Shows exactly which bytes are hashed — not the pretty JSON.'},
   {id:'supplier', name:'Suppliers',         lim:'Cannot see the ranking, or sign on another supplier’s behalf.'},
@@ -462,13 +462,13 @@ function draftStripModel(){
   const q = S.draft.query.trim();
   const n = S.draft.declared.size;
   return [
-    {n:'01', lb:'Query',     st:q?'done':'', go:'buyer',    hash:!!S.draftQueryHash,
+    {n:'01', lb:'Query',     st:q?'done':'', go:'requester', hash:!!S.draftQueryHash,
              v:!q ? 'awaiting request' : (S.draftQueryHash ? short(S.draftQueryHash)+'…' : 'hashing…')},
     {n:'02', lb:'Snapshot',  st:'', go:'agent',
              v:n ? `${n} candidate${n===1?'':'s'} declared` : 'no candidates declared'},
     {n:'03', lb:'Signature', st:'', go:'agent',    v:'unsigned'},
     {n:'04', lb:'Anchor',    st:'', go:'chain',    v:'not anchored'},
-    {n:'05', lb:'Custody',   st:'', go:'auditor',  v:`${S.model} · on commit`},
+    {n:'05', lb:'Custody',   st:'', go:'auditor',  v:`${modelName(S.model)} · on commit`},
     {n:'06', lb:'Receipts',  st:'', go:'supplier', v:'not requested'},
     {n:'07', lb:'Verdict',   st:'', go:'auditor',  v:'not audited'},
   ];
@@ -493,7 +493,7 @@ function stripModel(){
   const snap = p.snapshot ?? null;
   const anc = p.anchor ?? null;
   return [
-    {n:'01', lb:'Query',     st:p?'done':'',  go:'buyer',    hash:!!snap,
+    {n:'01', lb:'Query',     st:p?'done':'',  go:'requester', hash:!!snap,
              v:snap ? short(snap.query_hash)+'…' : 'preimage unavailable'},
     {n:'02', lb:'Snapshot',  st:hashSt,       go:'agent',    hash:!!p.snapshot_hash,
              v:p.snapshot_hash ? short(p.snapshot_hash)+'…' : 'not built'},
@@ -503,7 +503,7 @@ function stripModel(){
              v:anc ? `block ${anc.block}` : 'not anchored'},
     {n:'05', lb:'Custody',   st:custodySt,    go:'auditor',
              v:cs ? cs.toLowerCase()
-                  : p.custody ? `${p.custody.model} · ${(p.custody.holders??[]).length} holders`
+                  : p.custody ? `${modelName(p.custody.model)} · ${(p.custody.holders??[]).length} holders`
                   : 'manifest not loaded'},
     {n:'06', lb:'Receipts',  st:!cov?'':(cov.deny?'bad':cov.uncovered?'warn':'done'), go:'supplier',
              v:cov?`${cov.affirm} affirm · ${cov.deny} deny · ${cov.uncovered} uncovered`:'not requested'},
@@ -529,7 +529,7 @@ function renderProofBar(){
   }).join('');
   /* No "new query" affordance here: the bar is purely a switcher.
      Starting a run belongs to the roles that do it — "Ask the agent"
-     in the buyer view, "Start a new query" in the agent view. */
+     in the requester view, "Start a new query" in the agent view. */
   const draft = S.composing ? `<span class="pchip on draft"><span class="pdot"></span>new query</span>` : '';
   el.innerHTML =
     `<span class="plabel">${S.proofs.length} proof${S.proofs.length===1?'':'s'}</span>` +
@@ -561,12 +561,12 @@ function renderStrip(){
    ============================================================ */
 const V = {};
 
-V.buyer = () => {
+V.requester = () => {
   const p = cur();
   const w = p?.snapshot ? S.registry.find(r=>r.id===p.snapshot.winner_id) : null;
   const a = p?.audit ?? null;
   return `
-  <div class="eyebrow">Role 01 · Buyer</div>
+  <div class="eyebrow">Role 01 · Requester</div>
   <h1>Ask the agent</h1>
   <p class="lede">You see one answer and one proof ID. You never see the candidate pool — that is the whole problem, and the reason the proof ID has to be worth something.</p>
 
@@ -658,8 +658,8 @@ V.agent = () => {
 
   ${p?.custody?`<div class="card">
     <div class="klabel">Stage 5 · custody manifest</div>
-    <p class="hint">Model <b>${esc(p.custody.model)}</b> · retained until ${esc(p.custody.retention_until)}</p>
-    ${(p.custody.holders??[]).map(h=>`<div class="hold"><span class="hn">${esc(h.holder)}</span>
+    <p class="hint">Model <b>${esc(modelName(p.custody.model))}</b> · retained until ${esc(p.custody.retention_until)}</p>
+    ${(p.custody.holders??[]).map(h=>`<div class="hold"><span class="hn">${esc(holderName(h.holder))}</span>
       <span>${esc(h.label)}<br><span class="mono" style="color:var(--slate2);font-size:10.5px">ack ${short(h.ack_signature,28)}…</span></span></div>`).join('')}
     <div class="note">Each holder signed an acknowledgement that it holds the preimage. A holder that later cannot produce it is contradicting its own signature, rather than merely asserting bad luck.</div>
   </div>`:''}`;
@@ -736,7 +736,7 @@ V.schema = () => {
         <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--slate);line-height:1.7">
           <li>commission <b>rates</b> and <b>amounts</b> — only a per-candidate binary</li>
           <li>ranking <b>weights</b> and the rule's content — only a version pointer</li>
-          <li>buyer identity</li>
+          <li>requester identity</li>
           <li>supplier contact data</li>
           <li>the agent's internal scores and reasoning</li>
         </ul>
@@ -837,7 +837,7 @@ V.auditor = () => {
   <div class="card">
     <div class="klabel">Custody — per holder, never a single aggregate</div>
     ${(a.checks[1].holders??[]).map(h=>`<div class="hold">
-      <span class="hn">${esc(h.holder)}</span>
+      <span class="hn">${esc(holderName(h.holder))}</span>
       <span><span class="tag ${h.state==='AVAILABLE'?'t-ok':h.state==='EXPIRED'?'t-info':'t-bad'}">${h.state}</span>
       ${h.note?`<div style="color:var(--slate);margin-top:3px;font-size:11.5px">${esc(h.note)}</div>`:''}</span></div>`).join('')}
     <div class="note">Attribution is per holder. “The evidence is gone” is never the finding — “this named party, which signed that it held a copy, did not produce it” is.</div>
@@ -877,13 +877,13 @@ V.chain = () => {
 
 function emptyView(t,m){ return `<div class="eyebrow">ProofChoice</div><h1>${esc(t)}</h1><p class="lede">${esc(m)}</p>`; }
 
-function verdictBlock(a, buyerVoice){
+function verdictBlock(a, requesterVoice){
   const stale = cur()?.auditStale ? ' stale' : '';
   const T = {
-    pass:         buyerVoice?'This answer holds up':'Verified',
-    partial:      buyerVoice?'Partly verifiable':'Verified with gaps',
-    inconclusive: buyerVoice?'No longer checkable':'Inconclusive — evidence expired',
-    fail:         buyerVoice?'This answer does not hold up':'Verification failed',
+    pass:         requesterVoice?'This answer holds up':'Verified',
+    partial:      requesterVoice?'Partly verifiable':'Verified with gaps',
+    inconclusive: requesterVoice?'No longer checkable':'Inconclusive — evidence expired',
+    fail:         requesterVoice?'This answer does not hold up':'Verification failed',
   };
   return `<div class="verdict ${a.verdict}${stale}" role="status" aria-live="polite">
     <div class="vt">${T[a.verdict]}</div><div class="vd">${esc(a.summary)}</div></div>`;
@@ -1095,7 +1095,7 @@ const ACTIONS = {
     S.draft = { query: S.draft.query, declared: new Set(S.registry.map(c=>c.id)) };
     await updateDraftHash();
     clearError();
-    S.role = 'buyer';
+    S.role = 'requester';
   },
 };
 
@@ -1148,7 +1148,7 @@ async function hydrate(P){
    ============================================================ */
 const HOLDERS = [
   ['platform','Platform — the party under audit'],
-  ['buyer','Buyer copy'],
+  ['buyer','Requester copy'],
   ['neutral','Neutral custodian'],
 ];
 const MODES = ['serve','withhold','lost','unresponsive'];
@@ -1160,7 +1160,7 @@ function renderRail(){
 
   const sel = document.getElementById('selModel');
   if(!sel.options.length && S.health){
-    sel.innerHTML = S.health.custody_models.map(m=>`<option value="${m}">${m}</option>`).join('');
+    sel.innerHTML = S.health.custody_models.map(m=>`<option value="${m}">${esc(modelName(m))}</option>`).join('');
     sel.value = S.model;
   }
   sel.disabled = !S.composing;
@@ -1177,9 +1177,24 @@ function renderRail(){
   document.getElementById('btnTamper').disabled = !cur();
 }
 
+/* Display names for wire values. The identifiers `buyer` and
+   `buyer-copy` are frozen: they are written into the on-chain custody
+   manifest and into each holder's SIGNED acknowledgement, so renaming
+   them would break re-opening every proof already anchored. The role
+   is presented as the Requester; the wire keeps its original name. */
+const MODEL_LABELS = {
+  'platform-held':'Platform-held',
+  'buyer-copy':'Requester copy',
+  'escrow':'Neutral escrow',
+  'hybrid':'Hybrid — all three',
+};
+const HOLDER_LABEL = { platform:'platform', buyer:'requester', neutral:'neutral' };
+const holderName = id => HOLDER_LABEL[id] ?? id;
+const modelName  = m  => MODEL_LABELS[m] ?? m;
+
 const MODEL_NOTES = {
   'platform-held':'The party under audit holds the only copy. Withholding is a unilateral act.',
-  'buyer-copy':'Withholding now needs the platform and the party it harmed.',
+  'buyer-copy':'Withholding now needs the platform and the requester it harmed.',
   'escrow':'Unavailability becomes attributable to a party with no stake in the outcome.',
   'hybrid':'Three parties with divergent interests must all decline. Each refusal is named.',
 };
@@ -1202,7 +1217,7 @@ function render(){
   renderDisclosure();
   renderRail();
   renderStrip();
-  document.getElementById('stage').innerHTML = errorBlock() + (V[S.role] ?? V.buyer)();
+  document.getElementById('stage').innerHTML = errorBlock() + (V[S.role] ?? V.requester)();
 
   /* Announce the view change and put focus somewhere sensible, rather
      than swapping the whole stage out in silence. */

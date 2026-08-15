@@ -27,7 +27,7 @@ import { canon, signMsg } from './core.js';
  *  to a name rather than being an anonymous HTTP error. */
 export const HOLDERS = {
   platform: { id: 'platform', label: 'Platform (party under audit)', neutral: false },
-  buyer:    { id: 'buyer',    label: 'Buyer copy, delivered at recommendation time', neutral: false },
+  buyer:    { id: 'buyer',    label: 'Requester copy, delivered at recommendation time', neutral: false },
   neutral:  { id: 'neutral',  label: 'Neutral custodian / relayer', neutral: true },
 };
 
@@ -39,8 +39,8 @@ export const MODELS = {
   },
   'buyer-copy': {
     holders: ['platform', 'buyer'],
-    label: 'Buyer receives a copy at recommendation time',
-    note: 'Withholding now requires the platform AND the party it harmed. Costs almost nothing to run.',
+    label: 'Requester receives a copy at recommendation time',
+    note: 'Withholding now requires the platform AND the requester it harmed. Costs almost nothing to run.',
   },
   'escrow': {
     holders: ['platform', 'neutral'],
@@ -49,7 +49,7 @@ export const MODELS = {
   },
   'hybrid': {
     holders: ['platform', 'buyer', 'neutral'],
-    label: 'Hybrid — platform + buyer + neutral custodian',
+    label: 'Hybrid — platform + requester + neutral custodian',
     note: 'Three parties with divergent interests must all decline. Each refusal is named.',
   },
 };

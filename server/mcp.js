@@ -68,7 +68,7 @@ export const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: S('string', 'The buyer\'s procurement request, verbatim.'),
+        query: S('string', 'The requester\'s procurement request, verbatim.'),
         candidate_ids: { type: 'array', items: { type: 'string' }, description: 'Supplier IDs you considered. Whatever you list here is what gets committed — omitting one is the "silent deletion" adversary and the baseline layer cannot see it.' },
         winner_id: S('string', 'The supplier you are recommending. Must be one of candidate_ids.'),
         ranking_rule_id: S('string', 'Version pointer for the ranking rule in force, e.g. rr.value-weighted.v2. A pointer only — it commits WHICH rule applied, never the rule\'s content.'),
@@ -302,7 +302,7 @@ export async function callTool(name, args = {}, ctx) {
         `DELIBERATELY NOT COMMITTED — not in the snapshot, not in the anchor, not in the blob:\n` +
         `  · commission rates and amounts (only a per-candidate binary and the disclosed-ID list)\n` +
         `  · ranking weights and the rule's content (only a version pointer)\n` +
-        `  · buyer identity\n` +
+        `  · requester identity\n` +
         `  · supplier contact data\n` +
         `  · the agent's internal scores and reasoning\n\n` +
         `VISIBLE TO ANYONE HOLDING THE PREIMAGE — the privacy claim is about the anchor, not the blob:\n` +

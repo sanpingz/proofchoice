@@ -325,7 +325,7 @@ const REGISTRY = [
 ];
 
 const ROLES = [
-  {id:'buyer',    name:'Buyer',            lim:'Cannot see the candidate pool. Holds only a proof ID.'},
+  {id:'buyer',    name:'Requester',        lim:'Initiates the query. Receives one answer and one proof ID.'},
   {id:'agent',    name:'AI agent platform', lim:'Cannot alter an anchor once written, or suppress a relayed receipt.'},
   {id:'supplier', name:'Suppliers',        lim:'Cannot see the ranking, or sign on another supplier’s behalf.'},
   {id:'auditor',  name:'Auditor',          lim:'Cannot change the record. Only recompute and compare.'},
@@ -580,7 +580,7 @@ const V = {};
 V.buyer = () => {
   const w = S.winner;
   return `
-  <div class="eyebrow">Role 01 · Buyer</div>
+  <div class="eyebrow">Role 01 · Requester</div>
   <h1>Ask the agent</h1>
   <p class="lede">You see one answer and one proof ID. You never see the candidate pool — that is the whole problem, and the reason the proof ID has to be worth something.</p>
 
@@ -630,7 +630,7 @@ V.agent = () => {
     <div class="klabel">Stage 1 · candidate pool as the agent assembled it</div>
     ${S.stage>=1?`<table><thead><tr><th>ID</th><th>Supplier</th><th>Unit price</th><th>Score</th><th>Commission</th><th></th></tr></thead><tbody>${rows}</tbody></table>
     ${S.adv.prune?`<div class="note">Kowloon Bay Lodge — the cheapest supplier, paying no commission — was removed before the snapshot. The baseline layer will attest perfectly to the pool that remains. Nothing in stages 2–4 can detect this.</div>`:''}`
-    :`<div class="empty">No pool yet. Start from the Buyer role.</div>`}
+    :`<div class="empty">No pool yet. Start from the Requester role.</div>`}
   </div>
 
   <div class="card">
