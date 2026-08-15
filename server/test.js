@@ -22,7 +22,7 @@ import { join } from 'node:path';
 
 import { canon, sha256, merkleRoot, merklePath, merkleCheck, leavesFor } from './core.js';
 import { REGISTRY, Relayer, detectionProbability, sampleForTarget } from './registry.js';
-import { boot, originAllowed } from './server.js';
+import { boot, originAllowed, createHandler } from './server.js';
 import { callTool } from './mcp.js';
 import { handleRpc, SUPPORTED_VERSIONS } from './mcp.js';
 import { FsStore, MemoryStore, BlobStore, RedisClientStore, storeFromEnv } from './store.js';
@@ -416,6 +416,57 @@ async function origins() {
      true, 'the canonical production host is allowed from a preview deployment');
   if (saved === undefined) delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
   else process.env.VERCEL_PROJECT_PRODUCTION_URL = saved;
+
+  /* Routing must not depend on Vercel's filename conventions. An
+   * optional catch-all `api/[[...path]].js` silently matched only ONE
+   * segment on a plain project, so /health worked while
+   * /verify/PC-XXXX returned a platform 404 that never reached this
+   * code. Everything now rewrites to one function with the original
+   * path in `__p`; locally there is no rewrite and the pathname is
+   * used directly. Both forms must resolve identically. */
+  section('Routing — multi-segment paths');
+  const dir = await mkdtemp(join(tmpdir(), 'proofchoice-route-'));
+  try {
+    const ctx = await boot({ store: new FsStore(dir) });
+    const handler = createHandler(ctx);
+    const hit = async (u) => {
+      let status = 200, body = '';
+      const res = { writeHead(s) { status = s; }, setHeader() {}, write(c) { body += c; },
+                    end(c) { if (c) body += c; },
+                    get statusCode() { return status; }, set statusCode(v) { status = v; } };
+      await handler({ url: u, method: 'GET', headers: { host: 'h' },
+                      [Symbol.asyncIterator]: async function* () {} }, res);
+      let json = null; try { json = JSON.parse(body); } catch {}
+      return { status, json };
+    };
+
+    for (const [label, url] of [
+      ['local pathname', '/health'],
+      ['rewritten via __p', '/api?__p=/health'],
+      ['direct /api/*', '/api/health'],
+    ]) {
+      const r = await hit(url);
+      eq(r.status === 200 && r.json?.ok === true, true, `single-segment resolves — ${label}`);
+    }
+
+    /* The exact shape that broke in production. */
+    for (const [label, url] of [
+      ['local pathname', '/verify/PC-NOSUCHPROOF'],
+      ['rewritten via __p', '/api?__p=/verify/PC-NOSUCHPROOF'],
+      ['direct /api/*', '/api/verify/PC-NOSUCHPROOF'],
+    ]) {
+      const r = await hit(url);
+      eq(r.status === 404 && /no anchor/.test(r.json?.error ?? ''), true,
+         `two-segment path reaches the handler — ${label}`);
+      eq(typeof r.json?.anchors_visible === 'number', true,
+         `   … and answers with this instance's own view — ${label}`);
+    }
+
+    const q = await hit('/api?__p=/chain&limit=3');
+    eq(Array.isArray(q.json), true, 'query params survive alongside __p');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /* ============================================================

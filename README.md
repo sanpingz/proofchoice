@@ -468,9 +468,16 @@ npx vercel            # preview
 npx vercel --prod     # production
 ```
 
-`vercel.json` rewrites every non-`/api` path to the catch-all in [api/](api/), so `/mcp`, `/health`
-and the REST routes work at the deployment root. `public/` is served statically before any rewrite
-reaches the function. No build step; nothing to install.
+`vercel.json` rewrites every path to the single function [api/index.js](api/index.js), carrying the
+original path in a `__p` query parameter. `public/` is served statically before any rewrite reaches
+the function. No build step.
+
+That indirection is deliberate. An optional catch-all filename (`api/[[...path]].js`) is **not**
+honoured on a plain, non-framework project: it matched exactly one segment, so `/health` worked while
+`/verify/PC-XXXX` returned a Vercel `NOT_FOUND` that never reached this code — a routing failure that
+looks exactly like a missing proof. Routing now depends on an explicit rewrite rather than on a
+filename convention, and the suite exercises all three forms (`/verify/…`, `/api?__p=/verify/…`,
+`/api/verify/…`).
 
 ### You almost certainly want a persistent store
 

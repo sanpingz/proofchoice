@@ -304,9 +304,22 @@ async function readBody(req) {
 export function createHandler(ctx) {
   return async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-    /* Vercel routes everything through /api/[[...path]], so strip that
-     * prefix and serve the same paths in both deployments. */
-    const path = url.pathname.replace(/^\/api(?=\/|$)/, '').replace(/\/+$/, '') || '/';
+    /* Route resolution, deliberately independent of filename
+     * conventions.
+     *
+     * Vercel's filesystem router for a plain (non-framework) project
+     * did NOT honour an optional catch-all `api/[[...path]].js`: it
+     * matched exactly one segment, so /health worked and
+     * /verify/PC-XXXX returned a platform 404 that never reached this
+     * code. Rather than guess at another filename form, vercel.json
+     * rewrites every path to the single function `api/index.js` and
+     * carries the original path in `__p`.
+     *
+     * Locally there is no rewrite, so `__p` is absent and the pathname
+     * is used directly — one code path, both deployments. */
+    const routed = url.searchParams.get('__p');
+    const raw = routed || url.pathname;
+    const path = raw.replace(/^\/api(?=\/|$)/, '').replace(/\/+$/, '') || '/';
 
     /* DNS-rebinding protection, required by the transport spec. */
     if (!originAllowed(req.headers.origin, req)) {
