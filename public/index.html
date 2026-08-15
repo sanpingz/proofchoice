@@ -1060,7 +1060,20 @@ const ACTIONS = {
   async goVerify(){
     const P = cur();
     const r = await api.get('/verify/'+P.proof_id);
-    if(!r.ok) return setError('Verification could not run.', ' ' + (r.body.error ?? `HTTP ${r.status}`));
+    if(!r.ok){
+      const msg = r.body?.error ?? `HTTP ${r.status}`;
+      const st = S.health?.store;
+      /* "No anchor" almost always means the proof is not on THIS
+         instance's ledger, rather than that anything is wrong with the
+         proof. Say which, because the remedy is completely different. */
+      if(/no anchor/i.test(msg)){
+        return setError('Verification could not run.',
+          st && !st.persistent
+            ? ` ${P.proof_id} is not on this instance's ledger. The store is "${st.kind}", which is erased on restart and not shared between instances — a proof anchored moments ago can be invisible to the very next request. Attach a persistent store (Redis) and re-anchor.`
+            : ` ${P.proof_id} is not on this instance's ledger (${msg}). The proof itself may be fine — if this deployment runs more than one instance, check they all share the same store.`);
+      }
+      return setError('Verification could not run.', ` ${msg}`);
+    }
     clearError();
     P.audit = r.body;
     P.auditStale = false;
