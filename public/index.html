@@ -888,7 +888,40 @@ function render(){
 
   await loadChain();
   render();
+  if(S.health.dev) devReload();
 })();
+
+/* ============================================================
+   Dev reload — local only, and only when /health says so.
+   Two triggers, one channel:
+     · a file under public/ changed  → server pushes "reload"
+     · the server restarted (node --watch) → the stream drops, the
+       browser reconnects, sees a different boot id, and reloads
+   EventSource reconnects on its own, so there is no retry loop here.
+   ============================================================ */
+function devReload(){
+  let boot = null;
+  const es = new EventSource('/dev/events');
+  es.addEventListener('hello', e => {
+    const id = JSON.parse(e.data).boot;
+    if(boot && id !== boot) return location.reload();   // restarted underneath us
+    boot = id;
+    flag('live');
+  });
+  es.addEventListener('reload', () => location.reload());
+  es.onerror = () => flag('reconnecting…');
+
+  function flag(text){
+    let el = document.getElementById('devchip');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'devchip'; el.className = 'chip';
+      el.style.cssText = 'border-color:#BFD5C6;background:var(--seal-lite);color:var(--seal)';
+      document.querySelector('.masthead').appendChild(el);
+    }
+    el.textContent = 'dev · ' + text;
+  }
+}
 </script>
 </body>
 </html>

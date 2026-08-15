@@ -10,7 +10,9 @@
   },
   "scripts": {
     "start": "node server/server.js",
+    "dev": "node --watch server/server.js --dev",
     "test": "node server/test.js",
+    "test:watch": "node --watch server/test.js",
     "keygen": "node server/keygen.js"
   }
 }

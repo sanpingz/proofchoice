@@ -30,7 +30,7 @@
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { join, dirname, resolve, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,6 +51,57 @@ const PORT = Number(process.env.PC_PORT ?? 8787);
 const HOST = process.env.PC_HOST ?? '127.0.0.1';
 const FORCE_SSE = process.env.PC_FORCE_SSE === '1';
 const ALLOWED_ORIGINS = (process.env.PC_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+
+/* ============================================================
+   Dev mode
+   ------------------------------------------------------------
+   Opt-in, local only. Never enabled on serverless: it opens a
+   long-lived SSE stream and watches the filesystem, neither of
+   which a lambda can do, and an always-open stream would burn
+   execution time for nothing.
+
+       npm run dev     →  node --watch server/server.js --dev
+
+   Node's own --watch restarts the process when anything in the
+   module graph changes. This adds the other half: a reload channel
+   the console subscribes to, so edits to public/ refresh the
+   browser, and a restart refreshes it too (the stream drops, the
+   browser reconnects, sees a new boot id, and reloads).
+
+   No dependency, no injected script tag, no proxy.
+   ============================================================ */
+const IS_SERVERLESS = !!(process.env.VERCEL ?? process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DEV = (process.env.PC_DEV === '1' || process.argv.includes('--dev')) && !IS_SERVERLESS;
+
+const BOOT_ID = globalThis.crypto.randomUUID();
+const devClients = new Set();
+
+function devBroadcast(event, data) {
+  const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of devClients) { try { res.write(frame); } catch { devClients.delete(res); } }
+}
+
+function startDevWatch(onChange) {
+  let timer = null, pending = new Set();
+  const fire = () => {
+    const files = [...pending]; pending.clear(); timer = null;
+    onChange(files);
+  };
+  const handler = (_ev, file) => {
+    if (!file || /(^|[\\/])(\.|__)/.test(file)) return;   // editor temp files
+    pending.add(file);
+    clearTimeout(timer);
+    timer = setTimeout(fire, 80);                          // debounce editor write bursts
+  };
+  for (const dir of [PUBLIC]) {
+    if (!existsSync(dir)) continue;
+    try { watch(dir, { recursive: true }, handler); }
+    catch (e) { console.warn(`  dev: cannot watch ${dir} (${e.code}) — reload the browser manually`); }
+  }
+  /* Keep intermediaries and idle timeouts from closing the stream.
+     unref'd so it never holds the process open. */
+  setInterval(() => { for (const res of devClients) { try { res.write(':\n\n'); } catch {} } }, 25000).unref();
+}
 
 /* ============================================================
    Key material
@@ -230,6 +281,20 @@ export function createHandler(ctx) {
       return json(res, 403, { jsonrpc: '2.0', error: { code: -32600, message: 'Origin not allowed' } });
     }
 
+    /* Dev reload channel. Stays open; no chain refresh needed. */
+    if (DEV && path === '/dev/events') {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+      res.write(`retry: 500\nevent: hello\ndata: ${JSON.stringify({ boot: BOOT_ID })}\n\n`);
+      devClients.add(res);
+      req.on('close', () => devClients.delete(res));
+      return;
+    }
+
     try {
       /* Other instances may have appended since this one booted. */
       await ctx.chain.refresh();
@@ -272,6 +337,7 @@ export function createHandler(ctx) {
           ok: true, server: SERVER_INFO,
           mcp_protocol_versions: SUPPORTED_VERSIONS,
           mcp_endpoint: `${ctx.publicUrl}/mcp`,
+          dev: DEV,
           store: { kind: ctx.store.kind, persistent: ctx.store.persistent, shared: ctx.store.shared },
           key_source: ctx.keySource,
           platform_key_id: ctx.keys.platform.key_id,
@@ -405,6 +471,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`  platform key  ${ctx.keys.platform.key_id}  (${ctx.chain.blocks.length} blocks)`);
     console.log(`  custody       ${ctx.defaultCustodyModel}`);
     console.log(`  MCP versions  ${SUPPORTED_VERSIONS.join(', ')}`);
+    if (DEV) {
+      startDevWatch(files => {
+        console.log(`  dev: ${files.join(', ')} changed — reloading ${devClients.size} browser${devClients.size === 1 ? '' : 's'}`);
+        devBroadcast('reload', { files });
+      });
+      console.log(`  dev mode      on — watching public/, browsers reload automatically`);
+    }
     console.log(`\n  Cryptography is real. The ledger is a single-operator append-only log,`);
     console.log(`  not a blockchain. Do not describe it as one.\n`);
     if (!ctx.publicUrl.startsWith('https://')) {
