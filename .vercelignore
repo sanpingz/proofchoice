@@ -1,0 +1,10 @@
+# Local server state — chain, custody blobs, and PRIVATE KEY MATERIAL.
+# This must never be uploaded to a deployment. On Vercel the keys come
+# from the PC_KEYS environment variable and the ledger from KV.
+server/data/
+
+# Working documents, not needed at runtime.
+Design.md
+MEMO-01-custody-and-schema.md
+
+.DS_Store

@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ProofChoice — Evidence Layer Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#10151C; --ink2:#1A222C; --ink3:#28323E;
+  --paper:#F7F8F6; --card:#FFFFFF;
+  --wire:#D9DEDA; --wire2:#E9ECE9;
+  --slate:#5B6670; --slate2:#8A939B;
+  --seal:#1F4B3F; --seal-lite:#E4EDE7;
+  --amber:#9A5B12; --amber-lite:#F6EDE0;
+  --fault:#A8321E; --fault-lite:#F7E6E2;
+  --r:3px;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --disp:"Space Grotesk","IBM Plex Sans",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;font-size:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
+
+/* ---------- masthead ---------- */
+.masthead{
+  border-bottom:1px solid var(--wire); background:var(--card);
+  padding:14px 22px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+}
+.wordmark{font-family:var(--disp);font-weight:700;font-size:17px;letter-spacing:-.02em}
+.wordmark span{color:var(--seal)}
+.masthead .sub{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--slate2)}
+.masthead .spacer{flex:1}
+.chip{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+  border:1px solid var(--wire);border-radius:var(--r);padding:3px 8px;color:var(--slate);background:var(--paper);
+}
+
+/* ---------- evidence strip : the signature element ---------- */
+.strip{background:var(--ink);padding:15px 22px 17px;overflow-x:auto}
+.strip-hd{
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  color:#6E7C8A;margin-bottom:11px;
+}
+.custody{display:flex;align-items:stretch;gap:0;min-width:900px}
+.seg{flex:1;position:relative;padding-right:16px}
+.seg:last-child{padding-right:0}
+.seg .bar{
+  height:5px;border-radius:1px;background:transparent;
+  border:1px dashed #3B4854;transition:background .35s ease,border-color .35s ease;
+}
+.seg.done .bar{background:var(--seal);border:1px solid var(--seal)}
+.seg.warn .bar{background:var(--amber);border:1px solid var(--amber)}
+.seg.bad  .bar{background:var(--fault);border:1px solid var(--fault)}
+.seg .n{font-family:var(--mono);font-size:9.5px;color:#54626F;margin-top:9px;letter-spacing:.1em}
+.seg .lb{font-family:var(--disp);font-weight:600;font-size:12.5px;color:#8D9AA6;margin-top:2px;letter-spacing:-.01em}
+.seg.done .lb,.seg.warn .lb,.seg.bad .lb{color:#F2F5F3}
+.seg .val{font-family:var(--mono);font-size:10px;color:#6E7C8A;margin-top:3px;word-break:break-all;min-height:14px}
+.seg.bad .val{color:#E9A092}
+.seg.bad::after{
+  content:"BREAK";position:absolute;right:16px;top:-1px;
+  font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;color:var(--fault);
+}
+@media (prefers-reduced-motion:reduce){.seg .bar{transition:none}}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:246px 1fr;min-height:calc(100vh - 190px)}
+.rail{border-right:1px solid var(--wire);background:var(--card);padding:16px 0 0}
+.rail-hd{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--slate2);padding:0 16px 9px;
+}
+.role{
+  display:block;width:100%;text-align:left;background:none;border:0;
+  border-left:3px solid transparent;padding:10px 16px 11px;color:var(--ink);
+}
+.role:hover{background:var(--paper)}
+.role.on{border-left-color:var(--seal);background:var(--seal-lite)}
+.role .rname{font-family:var(--disp);font-weight:600;font-size:14px;letter-spacing:-.01em}
+.role .rlim{font-size:11.5px;color:var(--slate);margin-top:2px;line-height:1.35}
+.role.on .rlim{color:#3E5449}
+
+.adv{margin:18px 12px 14px;background:var(--ink);border-radius:var(--r);padding:13px 13px 11px}
+.adv h4{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;
+  color:#8794A0;margin:0 0 3px;
+}
+.adv p{font-size:11px;color:#7A8792;margin:0 0 10px;line-height:1.4}
+.tog{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-top:1px solid #263140}
+.tog:first-of-type{border-top:0}
+.tog input{margin:2px 0 0;accent-color:var(--fault);flex:none}
+.tog label{font-size:11.5px;color:#C9D2D8;line-height:1.35}
+.tog label b{display:block;font-family:var(--disp);font-weight:600;font-size:12px;color:#EDF1F3}
+.reset{
+  width:calc(100% - 24px);margin:0 12px 16px;background:var(--card);border:1px solid var(--wire);
+  border-radius:var(--r);padding:8px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--slate);
+}
+.reset:hover{border-color:var(--slate2);color:var(--ink)}
+
+/* ---------- stage ---------- */
+.stage{padding:24px 28px 60px;max-width:1000px}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--slate2)}
+h1{font-family:var(--disp);font-weight:700;font-size:26px;letter-spacing:-.025em;margin:5px 0 4px}
+.lede{color:var(--slate);font-size:14px;max-width:62ch;margin:0 0 20px}
+
+.card{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:17px 18px;margin-bottom:14px}
+.card h3{font-family:var(--disp);font-weight:600;font-size:15px;margin:0 0 3px;letter-spacing:-.01em}
+.card .hint{font-size:12px;color:var(--slate);margin:0 0 13px}
+.klabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--slate2);margin-bottom:6px}
+
+.act{
+  background:var(--ink);color:#fff;border:1px solid var(--ink);border-radius:var(--r);
+  padding:9px 15px;font-family:var(--disp);font-weight:600;font-size:13px;letter-spacing:-.005em;
+}
+.act:hover{background:var(--ink2)}
+.act:disabled{background:var(--wire2);border-color:var(--wire);color:var(--slate2);cursor:not-allowed}
+.act.ghost{background:none;color:var(--ink);border-color:var(--wire)}
+.act.ghost:hover{border-color:var(--slate)}
+.actrow{display:flex;gap:9px;flex-wrap:wrap;margin-top:4px}
+
+.mono{font-family:var(--mono);font-size:11.5px;word-break:break-all}
+pre.blob{
+  font-family:var(--mono);font-size:11px;line-height:1.6;background:var(--ink);color:#C8D3DA;
+  border-radius:var(--r);padding:13px 14px;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-all;
+}
+pre.blob .k{color:#89A6BD}
+pre.blob .s{color:#9FC7A9}
+pre.blob .n{color:#D9B48A}
+
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{
+  text-align:left;font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--slate2);font-weight:500;padding:0 10px 7px 0;border-bottom:1px solid var(--wire);
+}
+td{padding:8px 10px 8px 0;border-bottom:1px solid var(--wire2);vertical-align:top}
+tr.pruned td{color:var(--slate2);text-decoration:line-through}
+tr.pruned td.tag{text-decoration:none}
+tr.win td{background:var(--seal-lite)}
+td.num{font-family:var(--mono)}
+
+.tag{
+  display:inline-block;font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;
+  padding:2px 6px;border-radius:2px;white-space:nowrap;
+}
+.t-ok{background:var(--seal-lite);color:var(--seal)}
+.t-warn{background:var(--amber-lite);color:var(--amber)}
+.t-bad{background:var(--fault-lite);color:var(--fault)}
+.t-idle{background:var(--wire2);color:var(--slate)}
+
+.check{display:flex;gap:12px;padding:11px 0;border-top:1px solid var(--wire2);align-items:flex-start}
+.check:first-child{border-top:0}
+.check .ic{
+  flex:none;width:19px;height:19px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--mono);font-size:11px;font-weight:600;margin-top:1px;
+}
+.ic.ok{background:var(--seal);color:#fff}
+.ic.bad{background:var(--fault);color:#fff}
+.ic.warn{background:var(--amber);color:#fff}
+.ic.idle{background:var(--wire2);color:var(--slate2)}
+.check .cb{flex:1;min-width:0}
+.check .ct{font-family:var(--disp);font-weight:600;font-size:13px}
+.check .cd{font-size:11.5px;color:var(--slate);margin-top:2px;line-height:1.45}
+.check .cd code{font-family:var(--mono);font-size:10.5px;background:var(--paper);padding:1px 4px;border-radius:2px;word-break:break-all}
+
+.verdict{border-radius:var(--r);padding:15px 17px;margin-bottom:14px}
+.verdict.pass{background:var(--seal-lite);border:1px solid #BFD5C6}
+.verdict.fail{background:var(--fault-lite);border:1px solid #E7C3BA}
+.verdict.part{background:var(--amber-lite);border:1px solid #E5D0B4}
+.verdict .vt{font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:-.02em}
+.verdict.pass .vt{color:var(--seal)} .verdict.fail .vt{color:var(--fault)} .verdict.part .vt{color:var(--amber)}
+.verdict .vd{font-size:12.5px;margin-top:4px;color:var(--ink3);max-width:66ch}
+
+.cov{display:flex;gap:0;margin:12px 0 6px;border-radius:var(--r);overflow:hidden;height:26px;border:1px solid var(--wire)}
+.cov div{display:grid;place-items:center;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:#fff}
+.cov .c-a{background:var(--seal)} .cov .c-d{background:var(--fault)} .cov .c-u{background:#B6BEC4}
+
+.empty{color:var(--slate2);font-size:12.5px;font-style:italic;padding:6px 0}
+.note{
+  border-left:2px solid var(--wire);padding:2px 0 2px 12px;font-size:12px;color:var(--slate);
+  margin-top:12px;max-width:64ch;line-height:1.5;
+}
+.blk{background:var(--card);border:1px solid var(--wire);border-radius:var(--r);padding:12px 14px;margin-bottom:9px}
+.blk .bh{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:7px}
+.blk .bn{font-family:var(--mono);font-size:11px;color:var(--slate)}
+.blk .bt{font-family:var(--disp);font-weight:600;font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.shell{grid-template-columns:1fr}.rail{border-right:0;border-bottom:1px solid var(--wire)}.grid2{grid-template-columns:1fr}}
+input[type=text]{
+  width:100%;font-family:var(--mono);font-size:12.5px;padding:9px 11px;
+  border:1px solid var(--wire);border-radius:var(--r);background:var(--paper);color:var(--ink);
+}
+.shake{animation:sh .34s ease}
+@keyframes sh{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}60%{transform:translateX(4px)}}
+@media (prefers-reduced-motion:reduce){.shake{animation:none}}
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="wordmark">PROOF<span>CHOICE</span></div>
+  <div class="sub">Evidence layer prototype</div>
+  <div class="spacer"></div>
+  <div class="chip" id="chipCrypto">SHA-256 · ECDSA P-256 · live</div>
+  <div class="chip" id="chipChain">Chain: simulated</div>
+</div>
+
+<div class="strip">
+  <div class="strip-hd">Chain of custody — current proof</div>
+  <div class="custody" id="custody"></div>
+</div>
+
+<div class="shell">
+  <nav class="rail">
+    <div class="rail-hd">Roles · and what each may not do</div>
+    <div id="roles"></div>
+
+    <div class="adv">
+      <h4>Adversary controls</h4>
+      <p>Out-of-band switches. Turn one on, re-run, and watch which layer notices.</p>
+      <div id="advs"></div>
+    </div>
+    <button class="reset" id="btnReset">Reset run</button>
+  </nav>
+
+  <main class="stage" id="stage"></main>
+</div>
+
+<script>
+/* ============================================================
+   ProofChoice prototype
+   Real cryptography (WebCrypto), simulated ledger + transport.
+   ============================================================ */
+
+const enc = new TextEncoder();
+const hex = b => [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+const sha256 = async s => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
+const short = (h,n=10) => h ? h.slice(0,n) : '';
+
+/* deterministic JSON — key order must never affect the hash */
+function canon(o){
+  if(o===null||typeof o!=='object') return JSON.stringify(o);
+  if(Array.isArray(o)) return '['+o.map(canon).join(',')+']';
+  return '{'+Object.keys(o).sort().map(k=>JSON.stringify(k)+':'+canon(o[k])).join(',')+'}';
+}
+function pretty(o){
+  return JSON.stringify(o,null,2)
+    .replace(/"([^"]+)":/g,'<span class="k">"$1"</span>:')
+    .replace(/: "([^"]*)"/g,': <span class="s">"$1"</span>')
+    .replace(/: (\d+|true|false|null)/g,': <span class="n">$1</span>');
+}
+
+/* ---------- merkle ---------- */
+async function merkleRoot(leaves){
+  if(!leaves.length) return '0'.repeat(64);
+  let lvl = leaves.slice();
+  while(lvl.length>1){
+    const nxt=[];
+    for(let i=0;i<lvl.length;i+=2) nxt.push(await sha256(lvl[i]+(lvl[i+1]??lvl[i])));
+    lvl=nxt;
+  }
+  return lvl[0];
+}
+async function merklePath(leaves, idx){
+  let lvl=leaves.slice(), i=idx, path=[];
+  while(lvl.length>1){
+    const nxt=[];
+    for(let j=0;j<lvl.length;j+=2){
+      const a=lvl[j], b=lvl[j+1]??lvl[j];
+      if(j===i-(i%2)) path.push(i%2===0?{sib:b,side:'right'}:{sib:a,side:'left'});
+      nxt.push(await sha256(a+b));
+    }
+    i=Math.floor(i/2); lvl=nxt;
+  }
+  return path;
+}
+async function merkleCheck(leaf, path, root){
+  let h=leaf;
+  for(const s of path) h = s.side==='right' ? await sha256(h+s.sib) : await sha256(s.sib+h);
+  return h===root;
+}
+
+/* ---------- keys ---------- */
+async function newKey(){
+  const kp = await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+  const raw = await crypto.subtle.exportKey('raw', kp.publicKey);
+  const id  = (await sha256(hex(raw))).slice(0,16);
+  return {kp, key_id:id};
+}
+async function signMsg(k,msg){
+  return hex(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'}, k.kp.privateKey, enc.encode(msg)));
+}
+async function verifyMsg(pub,msg,sigHex){
+  const sig = new Uint8Array(sigHex.match(/../g).map(h=>parseInt(h,16)));
+  return crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'}, pub, sig, enc.encode(msg));
+}
+
+/* ============================================================
+   Fixed world
+   ============================================================ */
+
+const QUERY = 'Annual room-block framework · Phuket · 4-star+ · 120 room-nights/month';
+const RULE_ID = 'rr.value-weighted.v2';
+
+/* The independent category registry. The auditor samples from THIS,
+   never from the candidate set the platform declares. */
+const REGISTRY = [
+  {id:'SUP-01', name:'Northwind Lodge',    price:2610, score:88, comm:0},
+  {id:'SUP-02', name:'Horizon Bay Resort', price:3420, score:86, comm:8},
+  {id:'SUP-03', name:'Lantern Court',      price:2940, score:84, comm:0},
+  {id:'SUP-04', name:'Sunset Boutique',    price:2750, score:81, comm:0},
+  {id:'SUP-05', name:'Palm & Stone',       price:3100, score:79, comm:5},
+  {id:'SUP-06', name:'Cassia Grand',       price:3760, score:76, comm:10},
+  {id:'SUP-07', name:'Meridian Suites',    price:4150, score:74, comm:12},
+  {id:'SUP-08', name:'Aurora Phuket',      price:3980, score:71, comm:12}
+];
+
+const ROLES = [
+  {id:'buyer',    name:'Buyer',            lim:'Cannot see the candidate pool. Holds only a proof ID.'},
+  {id:'agent',    name:'AI agent platform', lim:'Cannot alter an anchor once written, or suppress a relayed receipt.'},
+  {id:'supplier', name:'Suppliers',        lim:'Cannot see the ranking, or sign on another supplier’s behalf.'},
+  {id:'auditor',  name:'Auditor',          lim:'Cannot change the record. Only recompute and compare.'},
+  {id:'chain',    name:'Anchor registry',  lim:'Append-only. No overwrite, no delete, no ranking logic.'}
+];
+
+const ADVERSARY = [
+  {id:'prune',   t:'Drop the cheapest candidate', d:'Platform removes Northwind Lodge before the snapshot is built.'},
+  {id:'tamper',  t:'Edit evidence after anchoring', d:'Platform rewrites the stored snapshot once the anchor is on chain.'},
+  {id:'withhold',t:'Withhold the evidence blob',   d:'Platform refuses to serve the off-chain preimage to the auditor.'},
+  {id:'legacy',  t:'Legacy receipt routing',       d:'Receipts flow through the platform instead of the neutral relayer.'},
+  {id:'nokeyreg',t:'Disable the key registry',     d:'No on-chain key→identity binding, so signatures become repudiable.'}
+];
+
+/* ============================================================
+   State
+   ============================================================ */
+
+let S = {};
+function blank(){
+  return {
+    role:'buyer', adv:{}, stage:0,
+    candidates:null, leaves:null, winner:null,
+    snapshot:null, snapshot_hash:null, proof_id:null,
+    signature:null, anchor:null,
+    vault:null, vaultServed:true,
+    receipts:[], coverage:null,
+    audit:null
+  };
+}
+let PLATFORM=null, SUPKEYS={}, CHAIN=[], KEYREG=[];
+
+/* ============================================================
+   Stages 1–6
+   ============================================================ */
+
+// 1 — the agent runs its own recommendation, untouched
+function stepRecommend(){
+  let pool = REGISTRY.slice();
+  if(S.adv.prune) pool = pool.filter(c=>c.id!=='SUP-01');
+  S.candidates = pool.map(c=>({...c, salt:crypto.randomUUID()}));
+  S.winner = S.candidates.reduce((a,b)=>b.score>a.score?b:a);
+  S.stage = 1;
+}
+
+// 2 — the plugin builds the snapshot: salted leaves, merkle root, canonical fields
+async function stepSnapshot(){
+  const sorted = S.candidates.slice().sort((a,b)=>a.id.localeCompare(b.id));
+  S.leaves = [];
+  for(const c of sorted){
+    S.leaves.push(await sha256(canon({
+      id:c.id, name:c.name, unit_price_cny:c.price,
+      commission_disclosed: c.comm>0, salt:c.salt
+    })));
+  }
+  const root = await merkleRoot(S.leaves);
+  S.sortedIds = sorted.map(c=>c.id);
+
+  S.snapshot = {
+    schema_version:'pc.snapshot.v1',
+    query_hash: await sha256(QUERY),
+    candidate_merkle_root: root,
+    candidate_count: sorted.length,
+    ranking_rule_id: RULE_ID,
+    commercial_disclosure:{
+      paid_placement: S.winner.comm>0,
+      disclosed_supplier_ids: sorted.filter(c=>c.comm>0).map(c=>c.id)
+    },
+    winner_id: S.winner.id,
+    nonce: crypto.randomUUID(),
+    signer_key_id: PLATFORM.key_id
+  };
+  S.snapshot_hash = await sha256(canon(S.snapshot));
+  S.proof_id = 'PC-' + S.snapshot_hash.slice(0,10).toUpperCase();
+
+  // off-chain evidence vault — the preimage the auditor will need
+  S.vault = {
+    proof_id:S.proof_id, query:QUERY, snapshot:S.snapshot,
+    candidates:sorted.map(c=>({id:c.id,name:c.name,unit_price_cny:c.price,commission_disclosed:c.comm>0,salt:c.salt}))
+  };
+  S.vaultServed = true;
+  S.stage = 2;
+}
+
+// 3 — platform signs the snapshot hash
+async function stepSign(){
+  S.signature = await signMsg(PLATFORM, S.snapshot_hash);
+  S.stage = 3;
+}
+
+// 4 — anchor(): write-once
+async function stepAnchor(){
+  if(CHAIN.some(b=>b.type==='anchor' && b.snapshot_hash===S.snapshot_hash))
+    throw new Error('anchor() reverted: snapshot_hash already anchored');
+  S.anchor = {
+    type:'anchor', block:CHAIN.length+1,
+    snapshot_hash:S.snapshot_hash,
+    platform_signature:S.signature,
+    signer_key_id:PLATFORM.key_id,
+    block_timestamp:new Date().toISOString(),
+    schema_version:'pc.anchor.v1'
+  };
+  CHAIN.push(S.anchor);
+  S.stage = 4;
+}
+
+// 5 — receipts, requested against the REGISTRY, not the candidate set
+async function stepReceipts(){
+  S.receipts = [];
+  for(const sup of REGISTRY){
+    if(!SUPKEYS[sup.id]) SUPKEYS[sup.id] = await newKey();
+    const included = S.sortedIds.includes(sup.id);
+    // an honest supplier answers truthfully about whether it was ever asked
+    const status = included ? 'affirm' : 'deny';
+    const body = canon({
+      receipt_version:'pc.receipt.v1', anchor_block:S.anchor.block,
+      snapshot_hash:S.snapshot_hash, supplier_id:sup.id,
+      status, query_type:'room-block-rfq', window:'2026-08'
+    });
+    const sig = await signMsg(SUPKEYS[sup.id], body);
+    const r = {supplier_id:sup.id, name:sup.name, status, body, sig,
+               key_id:SUPKEYS[sup.id].key_id, relayed:!S.adv.legacy, suppressed:false};
+    // legacy routing: the accused party carries the evidence, and drops what indicts it
+    if(S.adv.legacy && status==='deny') r.suppressed = true;
+    S.receipts.push(r);
+  }
+  const seen = S.receipts.filter(r=>!r.suppressed);
+  S.coverage = {
+    total:REGISTRY.length,
+    affirm:seen.filter(r=>r.status==='affirm').length,
+    deny:seen.filter(r=>r.status==='deny').length,
+    uncovered:REGISTRY.length - seen.length
+  };
+  CHAIN.push({type:'receipts', block:CHAIN.length+1, snapshot_hash:S.snapshot_hash,
+    receipt_count:seen.length, coverage_rate:+(seen.length/REGISTRY.length).toFixed(3),
+    block_timestamp:new Date().toISOString()});
+  S.stage = 5;
+}
+
+// 6 — audit: pull, recompute, compare. Nothing here trusts the platform.
+async function stepAudit(){
+  const A = {checks:[]};
+  const push=(t,st,d)=>A.checks.push({t,st,d});
+
+  const onchain = CHAIN.find(b=>b.type==='anchor' && b.snapshot_hash===S.snapshot_hash);
+  push('Anchor found for proof ID', onchain?'ok':'bad',
+    onchain?`Block ${onchain.block} · anchored ${onchain.block_timestamp}`:'No anchor matches this proof ID.');
+
+  // evidence availability — the chain cannot help here
+  if(S.adv.withhold){ S.vaultServed=false; }
+  push('Evidence blob available', S.vaultServed?'ok':'bad',
+    S.vaultServed
+      ? 'Preimage retrieved: query, candidate list, salts, snapshot fields.'
+      : 'The platform holds the only copy and did not serve it. The anchor survives; the evidence does not. This is a data-availability failure, not a chain failure.');
+
+  let served = S.vaultServed ? JSON.parse(JSON.stringify(S.vault)) : null;
+  if(served && S.adv.tamper){
+    // rewrite history in the only place it is actually stored
+    served.snapshot.winner_id = 'SUP-02';
+    served.candidates = served.candidates.filter(c=>c.id!=='SUP-01');
+    served.snapshot.candidate_count = served.candidates.length;
+  }
+
+  let recomputed=null, hashOK=false;
+  if(served){
+    recomputed = await sha256(canon(served.snapshot));
+    hashOK = recomputed === onchain?.snapshot_hash;
+  }
+  push('Recomputed hash matches the anchor', served?(hashOK?'ok':'bad'):'idle',
+    !served ? 'Skipped — no preimage to recompute from.'
+      : hashOK ? `<code>${recomputed}</code>`
+      : `Recomputed <code>${short(recomputed,24)}…</code> against anchored <code>${short(onchain.snapshot_hash,24)}…</code>. The stored evidence was edited after anchoring.`);
+
+  let sigOK=false;
+  if(onchain){
+    sigOK = await verifyMsg(PLATFORM.kp.publicKey, onchain.snapshot_hash, onchain.platform_signature);
+  }
+  const keyBound = !S.adv.nokeyreg && KEYREG.some(k=>k.key_id===onchain?.signer_key_id);
+  push('Platform signature valid, key bound to an identity',
+    sigOK ? (keyBound?'ok':'warn') : 'bad',
+    !sigOK ? 'Signature does not verify.'
+      : keyBound ? `ECDSA P-256 verified · key <code>${onchain.signer_key_id}</code> registered on chain at block ${KEYREG.find(k=>k.key_id===onchain.signer_key_id).block}.`
+      : 'Signature verifies, but no on-chain key registry binds this key to a named operator. The platform can later claim the key was compromised and repudiate everything signed with it.');
+
+  let incl=false;
+  if(served && hashOK){
+    const idx = S.sortedIds.indexOf(S.snapshot.winner_id);
+    const path = await merklePath(S.leaves, idx);
+    incl = await merkleCheck(S.leaves[idx], path, onchain.snapshot_hash===S.snapshot_hash ? S.snapshot.candidate_merkle_root : '');
+    push('Winner proven inside the committed candidate set', incl?'ok':'bad',
+      incl ? `Merkle inclusion proof verified, ${path.length} sibling${path.length===1?'':'s'}. Proves inclusion only — a root can never prove the set was complete.`
+           : 'Inclusion proof failed.');
+  } else {
+    push('Winner proven inside the committed candidate set','idle','Skipped — evidence unavailable or already mismatched.');
+  }
+
+  const c = S.coverage || {affirm:0,deny:0,uncovered:REGISTRY.length};
+  const denyState = c.deny>0 ? 'bad' : (c.uncovered>0 ? 'warn' : 'ok');
+  push('Registry coverage — was any supplier never asked?', denyState,
+    c.deny>0
+      ? `${c.deny} supplier${c.deny===1?'':'s'} in the category registry signed a denial: they were never queried, yet the platform declared its pool complete. This is the silent-deletion signal.`
+      : c.uncovered>0
+        ? `${c.uncovered} registry supplier${c.uncovered===1?'':'s'} returned no receipt. Recorded as uncovered — never counted as agreement.`
+        : `All ${c.total} registry suppliers returned signed receipts affirming they were queried.`);
+
+  const bad = A.checks.filter(x=>x.st==='bad').length;
+  const warn= A.checks.filter(x=>x.st==='warn'||x.st==='idle').length;
+  A.verdict = bad ? 'fail' : (warn ? 'part' : 'pass');
+  A.summary = bad
+    ? (S.adv.withhold ? 'The anchor is intact and the evidence is gone. The chain proved a commitment was made; it cannot prove what was committed to.'
+      : S.adv.tamper  ? 'The stored evidence no longer hashes to the anchored commitment. The edit is detected, and it is attributable.'
+      : S.adv.prune && !S.adv.legacy ? 'Baseline attestation is internally valid. The registry receipts contradict it: a supplier that was never asked proves the declared pool was not the real one.'
+      : 'One or more checks failed.')
+    : warn ? 'Verifiable, with gaps that must be read as gaps rather than as agreement.'
+    : 'Every check recomputes independently. Nothing here required trusting the platform’s own account.';
+  A.recomputed = recomputed;
+  S.audit = A; S.stage = 6;
+}
+
+/* ============================================================
+   Custody strip
+   ============================================================ */
+
+function custodyModel(){
+  const a = S.audit;
+  const covBad = S.coverage && S.coverage.deny>0;
+  return [
+    {n:'01',lb:'Query',    st:S.stage>=1?'done':'', v:S.snapshot?short(S.snapshot.query_hash,16)+'…':'awaiting request'},
+    {n:'02',lb:'Snapshot', st:S.stage>=2?(S.adv.tamper&&S.stage>=6?'bad':'done'):'', v:S.snapshot_hash?short(S.snapshot_hash,16)+'…':'not built'},
+    {n:'03',lb:'Signature',st:S.stage>=3?(S.adv.nokeyreg&&S.stage>=6?'warn':'done'):'', v:S.signature?short(S.signature,16)+'…':'unsigned'},
+    {n:'04',lb:'Anchor',   st:S.stage>=4?'done':'', v:S.anchor?`block ${S.anchor.block}`:'not anchored'},
+    {n:'05',lb:'Receipts', st:S.stage>=5?(covBad?'bad':(S.coverage.uncovered?'warn':'done')):'',
+      v:S.coverage?`${S.coverage.affirm} affirm · ${S.coverage.deny} deny · ${S.coverage.uncovered} uncovered`:'not requested'},
+    {n:'06',lb:'Verdict',  st:S.stage>=6?(a.verdict==='pass'?'done':a.verdict==='part'?'warn':'bad'):'',
+      v:a?a.verdict.toUpperCase():'not audited'}
+  ];
+}
+function renderCustody(){
+  document.getElementById('custody').innerHTML = custodyModel().map(s=>`
+    <div class="seg ${s.st}">
+      <div class="bar"></div><div class="n">${s.n}</div>
+      <div class="lb">${s.lb}</div><div class="val">${s.v}</div>
+    </div>`).join('');
+}
+
+/* ============================================================
+   Views
+   ============================================================ */
+
+const V = {};
+
+V.buyer = () => {
+  const w = S.winner;
+  return `
+  <div class="eyebrow">Role 01 · Buyer</div>
+  <h1>Ask the agent</h1>
+  <p class="lede">You see one answer and one proof ID. You never see the candidate pool — that is the whole problem, and the reason the proof ID has to be worth something.</p>
+
+  <div class="card">
+    <div class="klabel">Procurement request</div>
+    <input type="text" value="${QUERY}" readonly />
+    <div class="actrow" style="margin-top:12px">
+      <button class="act" id="go1" ${S.stage>=1?'disabled':''}>Ask the agent</button>
+    </div>
+  </div>
+
+  ${S.stage>=1?`
+  <div class="card">
+    <div class="klabel">Recommendation</div>
+    <h3>${w.name}</h3>
+    <p class="hint">¥${w.price.toLocaleString()} per room-night · quality score ${w.score} · ${w.comm>0?`supplier pays a ${w.comm}% commission`:'no commission paid to the platform'}</p>
+    <div class="klabel" style="margin-top:14px">Proof ID</div>
+    <div class="mono" style="font-size:15px;font-weight:600">${S.proof_id ?? '— issued once the snapshot is built —'}</div>
+    ${S.proof_id?`<div class="note">Derived from the snapshot hash, so you can locate your own anchor without asking the platform where it is. Hand this to any auditor.</div>`:''}
+  </div>`:''}
+
+  ${S.stage>=6?`<div class="verdict ${S.audit.verdict==='pass'?'pass':S.audit.verdict==='part'?'part':'fail'}">
+    <div class="vt">${S.audit.verdict==='pass'?'This answer holds up':S.audit.verdict==='part'?'Partly verifiable':'This answer does not hold up'}</div>
+    <div class="vd">${S.audit.summary}</div></div>`:''}
+  `;
+};
+
+V.agent = () => {
+  const rows = REGISTRY.map(c=>{
+    const inSet = S.candidates ? S.candidates.some(x=>x.id===c.id) : true;
+    const isWin = S.winner && S.winner.id===c.id;
+    return `<tr class="${!inSet?'pruned':''} ${isWin?'win':''}">
+      <td class="num">${c.id}</td><td>${c.name}</td>
+      <td class="num">¥${c.price.toLocaleString()}</td>
+      <td class="num">${c.score}</td>
+      <td class="num">${c.comm}%</td>
+      <td class="tag">${!inSet?'<span class="tag t-bad">dropped</span>':isWin?'<span class="tag t-ok">winner</span>':'<span class="tag t-idle">candidate</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="eyebrow">Role 02 · AI agent platform · ProofChoice plugin</div>
+  <h1>Baseline attestation</h1>
+  <p class="lede">The plugin observes. It never re-ranks, blocks or delays the recommendation — it commits to what the agent already decided, and signs that commitment.</p>
+
+  <div class="card">
+    <div class="klabel">Stage 1 · candidate pool as the agent assembled it</div>
+    ${S.stage>=1?`<table><thead><tr><th>ID</th><th>Supplier</th><th>Unit price</th><th>Score</th><th>Commission</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    ${S.adv.prune?`<div class="note">Northwind Lodge — the cheapest supplier, paying no commission — was removed before the snapshot. The baseline layer will attest perfectly to the pool that remains. Nothing in stages 2–4 can detect this.</div>`:''}`
+    :`<div class="empty">No pool yet. Start from the Buyer role.</div>`}
+  </div>
+
+  <div class="card">
+    <div class="klabel">Stage 2 · snapshot</div>
+    <p class="hint">Every candidate leaf is salted before hashing, so a shared Merkle path cannot be brute-forced back to a price.</p>
+    <div class="actrow"><button class="act" id="go2" ${S.stage!==1?'disabled':''}>Build the snapshot</button></div>
+    ${S.stage>=2?`<div style="margin-top:13px"><pre class="blob">${pretty(S.snapshot)}</pre>
+    <div class="klabel" style="margin-top:12px">snapshot_hash · SHA-256 over canonical JSON</div>
+    <div class="mono">${S.snapshot_hash}</div></div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="klabel">Stage 3 · platform signature</div>
+    <div class="actrow"><button class="act" id="go3" ${S.stage!==2?'disabled':''}>Sign (ECDSA P-256)</button></div>
+    ${S.stage>=3?`<div style="margin-top:12px"><div class="mono" style="color:var(--slate)">${S.signature}</div>
+    <div class="note">Signing binds the commitment to a key. It does not make the commitment true — the platform is signing its own account of its own decision.</div></div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="klabel">Stage 4 · anchor</div>
+    <p class="hint">Minimal fixed-size payload. No candidate data, no prices, no commission rates leave the platform.</p>
+    <div class="actrow"><button class="act" id="go4" ${S.stage!==3?'disabled':''}>Anchor to the registry</button></div>
+    ${S.stage>=4?`<div style="margin-top:12px"><pre class="blob">${pretty(S.anchor)}</pre></div>`:''}
+  </div>
+  `;
+};
+
+V.supplier = () => {
+  const rows = REGISTRY.map(sup=>{
+    const r = S.receipts.find(x=>x.supplier_id===sup.id);
+    let tag='<span class="tag t-idle">not asked yet</span>';
+    if(r){
+      if(r.suppressed) tag='<span class="tag t-warn">signed · never delivered</span>';
+      else if(r.status==='affirm') tag='<span class="tag t-ok">affirms it was queried</span>';
+      else tag='<span class="tag t-bad">denies · never asked</span>';
+    }
+    return `<tr><td class="num">${sup.id}</td><td>${sup.name}</td>
+      <td>${r?`<span class="mono" style="font-size:10.5px;color:var(--slate2)">${short(r.sig,20)}…</span>`:'—'}</td>
+      <td>${tag}</td></tr>`;
+  }).join('');
+
+  const c = S.coverage;
+  return `
+  <div class="eyebrow">Role 03 · Suppliers · independent receipts</div>
+  <h1>Enhanced layer</h1>
+  <p class="lede">Receipt requests go to every supplier in the category registry — not to the list the platform declared. That is what makes a denial possible at all: a supplier that was quietly dropped is still asked, and can still answer.</p>
+
+  <div class="card">
+    <div class="klabel">Stage 5 · request signed receipts from the registry</div>
+    <p class="hint">Suppliers sign offline. No node, no gas, no chain knowledge. Signed receipts reach the registry through a neutral relayer, never through the platform being audited.</p>
+    <div class="actrow"><button class="act" id="go5" ${S.stage!==4?'disabled':''}>Send receipt requests</button></div>
+    ${S.adv.legacy?`<div class="note" style="border-left-color:var(--fault)"><b>Legacy routing is on.</b> The platform batches receipts on the suppliers' behalf. Watch what happens to the denials.</div>`:''}
+  </div>
+
+  ${S.receipts.length?`
+  <div class="card">
+    <div class="klabel">Registry responses</div>
+    <table><thead><tr><th>ID</th><th>Supplier</th><th>Signature</th><th>Response</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="klabel" style="margin-top:16px">Coverage — recorded, never rounded up</div>
+    <div class="cov">
+      ${c.affirm?`<div class="c-a" style="flex:${c.affirm}">${c.affirm} affirm</div>`:''}
+      ${c.deny?`<div class="c-d" style="flex:${c.deny}">${c.deny} deny</div>`:''}
+      ${c.uncovered?`<div class="c-u" style="flex:${c.uncovered}">${c.uncovered} uncovered</div>`:''}
+    </div>
+    <div class="note">A missing receipt is recorded as <b>uncovered</b>. It is never silently folded into agreement — the difference between "nobody objected" and "nobody was asked" is the entire mechanism.
+    ${S.adv.legacy?` Under legacy routing the denials were signed and then dropped in transit, so coverage reads as clean while the pruning stays invisible.`:''}</div>
+  </div>`:''}
+  `;
+};
+
+V.auditor = () => {
+  const a = S.audit;
+  return `
+  <div class="eyebrow">Role 04 · Auditor</div>
+  <h1>Pull · recompute · compare</h1>
+  <p class="lede">Nothing below asks the platform to vouch for itself. Every check is recomputed from the preimage and matched against the anchor.</p>
+
+  <div class="card">
+    <div class="klabel">Stage 6 · verification</div>
+    <div class="klabel" style="margin-top:10px">Proof ID under audit</div>
+    <div class="mono" style="font-size:14px;font-weight:600;margin-bottom:12px">${S.proof_id ?? '—'}</div>
+    <div class="actrow"><button class="act" id="go6" ${S.stage!==5?'disabled':''}>Run verification</button></div>
+  </div>
+
+  ${a?`
+  <div class="verdict ${a.verdict==='pass'?'pass':a.verdict==='part'?'part':'fail'}">
+    <div class="vt">${a.verdict==='pass'?'Verified':a.verdict==='part'?'Verified with gaps':'Verification failed'}</div>
+    <div class="vd">${a.summary}</div>
+  </div>
+  <div class="card">
+    ${a.checks.map(c=>`<div class="check">
+      <div class="ic ${c.st}">${c.st==='ok'?'✓':c.st==='bad'?'✕':c.st==='warn'?'!':'·'}</div>
+      <div class="cb"><div class="ct">${c.t}</div><div class="cd">${c.d}</div></div>
+    </div>`).join('')}
+  </div>`:''}
+  `;
+};
+
+V.chain = () => `
+  <div class="eyebrow">Role 05 · Anchor registry</div>
+  <h1>Append-only record</h1>
+  <p class="lede">Simulated in this prototype. <code class="mono">anchor()</code> writes once and reverts on a repeat hash. <code class="mono">appendReceipts()</code> appends. <code class="mono">getAnchor()</code> reads — it returns a stored commitment, it does not verify anything; recomputation happens off-chain, in the auditor.</p>
+  ${CHAIN.length?CHAIN.slice().reverse().map(b=>`
+    <div class="blk">
+      <div class="bh"><div class="bt">${b.type==='anchor'?'anchor()':b.type==='keyreg'?'registerKey()':'appendReceipts()'}</div>
+      <div class="bn">block ${b.block}</div></div>
+      <pre class="blob">${pretty(b)}</pre>
+    </div>`).join(''):'<div class="empty">Nothing anchored yet.</div>'}
+`;
+
+/* ============================================================
+   Render + wiring
+   ============================================================ */
+
+function render(){
+  document.getElementById('roles').innerHTML = ROLES.map(r=>`
+    <button class="role ${S.role===r.id?'on':''}" data-role="${r.id}">
+      <div class="rname">${r.name}</div><div class="rlim">${r.lim}</div>
+    </button>`).join('');
+
+  document.getElementById('advs').innerHTML = ADVERSARY.map(a=>`
+    <div class="tog">
+      <input type="checkbox" id="adv_${a.id}" data-adv="${a.id}" ${S.adv[a.id]?'checked':''} />
+      <label for="adv_${a.id}"><b>${a.t}</b>${a.d}</label>
+    </div>`).join('');
+
+  document.getElementById('stage').innerHTML = V[S.role]();
+  renderCustody();
+
+  document.querySelectorAll('[data-role]').forEach(b=>b.onclick=()=>{S.role=b.dataset.role;render();});
+  document.querySelectorAll('[data-adv]').forEach(b=>b.onclick=()=>{
+    S.adv[b.dataset.adv]=b.checked;
+    if(S.stage>0) reset(true);   // switches only take effect on a fresh run
+    else render();
+  });
+
+  const steps = {
+    go1:()=>{stepRecommend();},
+    go2:stepSnapshot, go3:stepSign, go4:stepAnchor,
+    go5:stepReceipts, go6:stepAudit
+  };
+  Object.entries(steps).forEach(([id,fn])=>{
+    const el=document.getElementById(id); if(!el) return;
+    el.onclick=async()=>{
+      el.disabled=true;
+      try{ await fn(); }catch(e){ alert(e.message); }
+      const jump={go1:'agent',go4:'supplier',go5:'auditor'};
+      if(jump[id]) S.role=jump[id];
+      render();
+      if(id==='go6' && S.audit.verdict==='fail'){
+        const st=document.getElementById('stage');
+        st.classList.add('shake'); setTimeout(()=>st.classList.remove('shake'),400);
+      }
+    };
+  });
+}
+
+function reset(keepAdv){
+  const adv = keepAdv ? S.adv : {};
+  const role = keepAdv ? S.role : 'buyer';
+  S = blank(); S.adv = adv; S.role = role;
+  render();
+}
+
+document.getElementById('btnReset').onclick=()=>reset(false);
+
+(async function boot(){
+  S = blank();
+  PLATFORM = await newKey();
+  KEYREG.push({type:'keyreg', block:1, key_id:PLATFORM.key_id,
+    operator:'Doubao Travel Procurement Agent', curve:'P-256',
+    block_timestamp:new Date().toISOString()});
+  CHAIN.push(KEYREG[0]);
+  document.getElementById('chipCrypto').textContent =
+    `SHA-256 · ECDSA P-256 · key ${PLATFORM.key_id}`;
+  render();
+})();
+</script>
+</body>
+</html>
