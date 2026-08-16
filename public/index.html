@@ -56,7 +56,7 @@ a{color:var(--seal);text-decoration:none}
 a:hover{text-decoration:underline}
 button:focus-visible,a:focus-visible{outline:2px solid var(--seal-bright);outline-offset:3px;border-radius:2px}
 h1,h2,h3{letter-spacing:-.025em;margin:0}
-.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+.wrap{max-width:1296px;margin:0 auto;padding:0 24px}
 /* A grid item defaults to min-width:auto, so one wide child — a <pre>
    of canonical JSON, a hash that cannot break — widens its whole
    column and scrolls the document sideways. Every grid on this page
@@ -69,7 +69,7 @@ h1,h2,h3{letter-spacing:-.025em;margin:0}
 /* ---------- nav ---------- */
 .nav{position:sticky;top:0;z-index:20;background:rgba(247,248,246,.86);backdrop-filter:saturate(160%) blur(10px);
   border-bottom:1px solid var(--wire)}
-.nav .inner{max-width:1080px;margin:0 auto;padding:11px 24px;display:flex;align-items:center;gap:26px}
+.nav .inner{max-width:1296px;margin:0 auto;padding:11px 24px;display:flex;align-items:center;gap:26px}
 .brand{display:flex;align-items:center;gap:9px;color:inherit}
 .brand:hover{text-decoration:none;opacity:.75}
 .brand img{width:27px;height:27px;display:block;flex:none}
@@ -93,30 +93,44 @@ h1,h2,h3{letter-spacing:-.025em;margin:0}
 @media(max-width:860px){.navlinks{display:none}}
 
 /* ---------- hero ---------- */
-.hero{background:var(--ink);color:#EDF1F3;padding:76px 0 70px;position:relative;overflow:hidden}
+.hero{background:var(--ink);color:#EDF1F3;padding:94px 0 86px;position:relative;overflow:hidden}
 /* Faint ledger rule — the visual metaphor of the whole product, at 4% */
 .hero::before{content:"";position:absolute;inset:0;pointer-events:none;
   background-image:linear-gradient(to bottom,rgba(255,255,255,.045) 1px,transparent 1px);background-size:100% 34px}
-.hero .wrap{position:relative;display:grid;grid-template-columns:1.05fr .95fr;gap:52px;align-items:center}
-.hero h1{font-size:47px;line-height:1.06;font-weight:700;margin:14px 0 0;color:#fff}
+/* The widget is dense monospace and stops improving past ~540px, so
+   the extra width goes to the headline column rather than being split
+   evenly between them. */
+.hero .wrap{position:relative;display:grid;grid-template-columns:1fr minmax(0,540px);gap:64px;align-items:center}
+.hero h1{font-size:56px;line-height:1.03;letter-spacing:-.032em;font-weight:700;margin:16px 0 0;color:#fff;max-width:15ch}
 .hero h1 em{font-style:normal;color:var(--seal-bright)}
-.hero .sub{font-size:17px;color:#B4C0C9;max-width:52ch;margin:18px 0 0}
-.hero .cta{display:flex;gap:11px;flex-wrap:wrap;margin-top:28px}
-.hero .under{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:20px;letter-spacing:.03em}
+.hero .sub{font-size:17.5px;line-height:1.6;color:#B4C0C9;max-width:54ch;margin:22px 0 0}
+.hero .cta{display:flex;gap:11px;flex-wrap:wrap;margin-top:32px}
+/* Each promise wraps as a unit: "Never" stranded at the end of a line
+   reads as the start of a different sentence. */
+/* Spacing separates them, not an interpunct: a separator glyph
+   belongs to the item after it and lands at the head of the next line
+   when the row wraps. */
+.hero .under{font-family:var(--mono);font-size:11px;color:var(--dim);margin:26px 0 0;letter-spacing:.03em;
+  display:flex;flex-wrap:wrap;gap:8px 30px;align-items:baseline}
+.hero .under span{white-space:nowrap}
 .hero .under b{color:#9FADB9;font-weight:500}
-@media(max-width:900px){.hero .wrap{grid-template-columns:1fr;gap:36px}.hero h1{font-size:36px}.hero{padding:52px 0 54px}}
+/* Below this, a fixed 540px widget column starves the headline, so
+   the two share the remaining width proportionally instead. */
+@media(max-width:1180px){.hero .wrap{grid-template-columns:1fr .82fr;gap:44px}.hero h1{font-size:46px}}
+@media(max-width:900px){.hero .wrap{grid-template-columns:1fr;gap:38px}.hero h1{font-size:38px;max-width:20ch}
+  .hero{padding:56px 0 58px}}
 
 /* ---------- live commitment widget ---------- */
 .widget{background:var(--ink2);border:1px solid #2E3A47;border-radius:5px;overflow:hidden}
-.widget .wh{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid #2E3A47;background:#151D26}
+.widget .wh{display:flex;align-items:center;gap:9px;padding:11px 16px;border-bottom:1px solid #2E3A47;background:#151D26}
 .widget .wh .t{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .widget .wh .live{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9.5px;
   letter-spacing:.1em;text-transform:uppercase;color:var(--seal-bright)}
 .widget .wh .live i{width:6px;height:6px;border-radius:50%;background:var(--seal-bright);display:block}
-.widget .body{padding:13px 14px 15px}
-.widget .cap{font-size:11.5px;color:var(--dim);margin:0 0 9px;line-height:1.45}
-.cands{display:flex;flex-wrap:wrap;gap:5px}
-.cand{font-family:var(--mono);font-size:10.5px;padding:4px 8px;border-radius:2px;border:1px solid #2E3A47;
+.widget .body{padding:15px 16px 17px}
+.widget .cap{font-size:11.5px;color:var(--dim);margin:0 0 11px;line-height:1.5}
+.cands{display:flex;flex-wrap:wrap;gap:6px}
+.cand{font-family:var(--mono);font-size:11px;padding:5px 9px;border-radius:2px;border:1px solid #2E3A47;
   background:#151D26;color:#8D9AA6;display:inline-flex;align-items:center;gap:6px}
 .cand:hover{border-color:#54626F;color:#DCE4EA}
 .cand.in{border-color:#356052;background:#16241E;color:#CFE3D8}
@@ -124,15 +138,19 @@ h1,h2,h3{letter-spacing:-.025em;margin:0}
 .cand .d{width:6px;height:6px;border-radius:50%;background:#3B4854;flex:none}
 .cand.in .d{background:var(--seal-bright)}
 .cand.out{text-decoration:line-through;opacity:.72}
-.canonbox{font-family:var(--mono);font-size:10.5px;line-height:1.65;color:#8FA9BC;background:#0C1219;border:1px solid #232E39;
-  border-radius:2px;padding:9px 10px;margin-top:11px;max-height:86px;overflow:auto;word-break:break-all;white-space:pre-wrap}
+.canonbox{font-family:var(--mono);font-size:11px;line-height:1.7;color:#8FA9BC;background:#0C1219;border:1px solid #232E39;
+  /* Sized to whole lines (5 × 11px/1.7 + padding) so the box never
+     clips a row of hex through the middle. */
+  border-radius:2px;padding:10px 11px;margin-top:12px;max-height:114px;overflow:auto;word-break:break-all;white-space:pre-wrap}
 .canonbox .k{color:#7C97AC} .canonbox .s{color:#9FC7A9} .canonbox .n{color:#D9B48A}
-.outrow{display:flex;gap:12px;margin-top:11px;flex-wrap:wrap}
+/* The two outputs are the point of the widget, so they sit below a
+   rule of their own rather than reading as more body copy. */
+.outrow{display:flex;gap:16px;margin-top:14px;padding-top:13px;border-top:1px solid #2E3A47;flex-wrap:wrap;align-items:flex-start}
 .outrow .o{flex:1;min-width:150px}
 .outrow .ol{font-family:var(--mono);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim)}
-.outrow .ov{font-family:var(--mono);font-size:12px;color:#EAF2ED;word-break:break-all;margin-top:3px;transition:color .2s}
-.outrow .ov.pid{color:var(--seal-bright);font-weight:600;font-size:14px;letter-spacing:.02em}
-.widget .foot{border-top:1px solid #2E3A47;padding:9px 14px;font-size:10.5px;color:var(--dim);line-height:1.45}
+.outrow .ov{font-family:var(--mono);font-size:12px;color:#EAF2ED;word-break:break-all;margin-top:4px;transition:color .2s}
+.outrow .ov.pid{color:var(--seal-bright);font-weight:600;font-size:16px;letter-spacing:.02em;white-space:nowrap}
+.widget .foot{border-top:1px solid #2E3A47;padding:10px 16px;font-size:10.5px;color:var(--dim);line-height:1.5}
 
 /* ---------- claim strip ---------- */
 .claim{background:var(--card);border-bottom:1px solid var(--wire);padding:30px 0}
@@ -318,8 +336,9 @@ footer{background:var(--card);padding:44px 0 30px}
         <a class="btn ghost on-dark" href="#how">See how it works</a>
       </div>
       <p class="under">
-        <b>Never</b> discloses your ranking logic &nbsp;·&nbsp; <b>Never</b> re-orders a result
-        &nbsp;·&nbsp; <b>Never</b> sits in the request path
+        <span><b>Never</b> discloses your ranking logic</span>
+        <span><b>Never</b> re-orders a result</span>
+        <span><b>Never</b> sits in the request path</span>
       </p>
     </div>
 
